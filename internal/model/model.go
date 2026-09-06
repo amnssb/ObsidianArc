@@ -32,7 +32,17 @@ type Capabilities struct {
 	// The endpoint accepts image parts in a request.
 	SupportsImages bool `json:"supports_images"`
 	// The model actually reasons over them.
-	SupportsVision       bool `json:"supports_vision"`
+	SupportsVision bool `json:"supports_vision"`
+	// The model's answer carries pictures. The image toolbox lists exactly
+	// these, and the gateway lifts the pictures out of a finished answer into
+	// attachments only for these — a text model echoing a base64 blob is not
+	// a picture the interface should present as one.
+	SupportsImageOutput bool `json:"supports_image_output"`
+	// Two different ways to draw. One means the model's chat answer carries
+	// pictures; the other means the provider exposes it on a native images
+	// endpoint (gpt-image-1 and friends, which refuse chat/completions). The
+	// toolbox lists either and calls each the way it works.
+	SupportsImageAPI     bool `json:"supports_image_api"`
 	SupportsStreaming    bool `json:"supports_streaming"`
 	SupportsSystemPrompt bool `json:"supports_system_prompt"`
 	SupportsTools        bool `json:"supports_tools"`
@@ -178,7 +188,9 @@ const (
 
 const columns = `m.id, m.provider_id, m.model_id, m.display_name, m.description, m.avatar,
 	m.enabled, m.sort_order,
-	m.supports_reasoning, m.supports_images, m.supports_vision, m.supports_streaming,
+	m.supports_reasoning, m.supports_images, m.supports_vision, m.supports_image_output,
+	m.supports_image_api,
+	m.supports_streaming,
 	m.supports_system_prompt, m.supports_tools, m.context_window, m.max_output_tokens,
 	m.request_weight, m.input_token_weight, m.output_token_weight, m.reasoning_token_weight,
 	m.created_at, m.updated_at, m.route_to_id, m.reasoning_style, m.hidden,
@@ -239,15 +251,17 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Model, error) {
 
 	_, err = s.db.Exec(ctx, `INSERT INTO models
 		(id, provider_id, model_id, display_name, description, avatar, enabled, hidden, sort_order,
-		 supports_reasoning, supports_images, supports_vision, supports_streaming,
+		 supports_reasoning, supports_images, supports_vision, supports_image_output, supports_image_api,
+		 supports_streaming,
 		 supports_system_prompt, supports_tools, context_window, max_output_tokens,
 		 request_weight, input_token_weight, output_token_weight, reasoning_token_weight,
 		 created_at, updated_at, route_to_id, reasoning_style, reasoning_tiers)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.ProviderID, record.ModelID, record.DisplayName, record.Description,
 		record.Avatar, record.Enabled, record.Hidden, record.SortOrder,
 		record.SupportsReasoning, record.SupportsImages, record.SupportsVision,
-		record.SupportsStreaming, record.SupportsSystemPrompt, record.SupportsTools,
+		record.SupportsImageOutput, record.SupportsImageAPI, record.SupportsStreaming, record.SupportsSystemPrompt,
+		record.SupportsTools,
 		record.ContextWindow, record.MaxOutputTokens,
 		record.Request, record.InputToken, record.OutputToken, record.ReasoningToken,
 		record.CreatedAt, record.UpdatedAt, routeValue(record.RouteToID), record.ReasoningStyle,
@@ -277,6 +291,8 @@ type Update struct {
 	SupportsReasoning    *bool
 	SupportsImages       *bool
 	SupportsVision       *bool
+	SupportsImageOutput  *bool
+	SupportsImageAPI     *bool
 	SupportsStreaming    *bool
 	SupportsSystemPrompt *bool
 	SupportsTools        *bool
@@ -309,6 +325,8 @@ func (s *Store) Update(ctx context.Context, modelID string, in Update) (Model, e
 	assign(&next.SupportsReasoning, in.SupportsReasoning)
 	assign(&next.SupportsImages, in.SupportsImages)
 	assign(&next.SupportsVision, in.SupportsVision)
+	assign(&next.SupportsImageOutput, in.SupportsImageOutput)
+	assign(&next.SupportsImageAPI, in.SupportsImageAPI)
 	assign(&next.SupportsStreaming, in.SupportsStreaming)
 	assign(&next.SupportsSystemPrompt, in.SupportsSystemPrompt)
 	assign(&next.SupportsTools, in.SupportsTools)
@@ -327,14 +345,15 @@ func (s *Store) Update(ctx context.Context, modelID string, in Update) (Model, e
 
 	_, err = s.db.Exec(ctx, `UPDATE models SET
 		model_id = ?, display_name = ?, description = ?, avatar = ?, enabled = ?, hidden = ?, sort_order = ?,
-		supports_reasoning = ?, supports_images = ?, supports_vision = ?, supports_streaming = ?,
-		supports_system_prompt = ?, supports_tools = ?, context_window = ?, max_output_tokens = ?,
+		supports_reasoning = ?, supports_images = ?, supports_vision = ?, supports_image_output = ?, supports_image_api = ?,
+		supports_streaming = ?, supports_system_prompt = ?, supports_tools = ?, context_window = ?, max_output_tokens = ?,
 		request_weight = ?, input_token_weight = ?, output_token_weight = ?, reasoning_token_weight = ?,
 		route_to_id = ?, reasoning_style = ?, reasoning_tiers = ?, updated_at = ?
 		WHERE id = ?`,
 		next.ModelID, next.DisplayName, next.Description, next.Avatar, next.Enabled, next.Hidden, next.SortOrder,
-		next.SupportsReasoning, next.SupportsImages, next.SupportsVision, next.SupportsStreaming,
-		next.SupportsSystemPrompt, next.SupportsTools, next.ContextWindow, next.MaxOutputTokens,
+		next.SupportsReasoning, next.SupportsImages, next.SupportsVision, next.SupportsImageOutput, next.SupportsImageAPI,
+		next.SupportsStreaming, next.SupportsSystemPrompt, next.SupportsTools,
+		next.ContextWindow, next.MaxOutputTokens,
 		next.Request, next.InputToken, next.OutputToken, next.ReasoningToken,
 		routeValue(next.RouteToID), next.ReasoningStyle, encodeTiers(next.ReasoningTiers),
 		next.UpdatedAt, modelID)
@@ -543,8 +562,8 @@ func (s *Store) readCallable(
 		&record.ID, &record.ProviderID, &record.ModelID, &record.DisplayName, &record.Description,
 		&record.Avatar, &record.Enabled, &record.SortOrder,
 		&record.SupportsReasoning, &record.SupportsImages, &record.SupportsVision,
-		&record.SupportsStreaming, &record.SupportsSystemPrompt, &record.SupportsTools,
-		&record.ContextWindow, &record.MaxOutputTokens,
+		&record.SupportsImageOutput, &record.SupportsImageAPI, &record.SupportsStreaming, &record.SupportsSystemPrompt,
+		&record.SupportsTools, &record.ContextWindow, &record.MaxOutputTokens,
 		&record.Request, &record.InputToken, &record.OutputToken, &record.ReasoningToken,
 		&record.CreatedAt, &record.UpdatedAt, &route, &record.ReasoningStyle,
 		&record.Hidden, &tiers,
@@ -906,8 +925,8 @@ func scan(row rowScanner, joined bool, withUsable bool) (Model, error) {
 		&record.ID, &record.ProviderID, &record.ModelID, &record.DisplayName, &record.Description,
 		&record.Avatar, &record.Enabled, &record.SortOrder,
 		&record.SupportsReasoning, &record.SupportsImages, &record.SupportsVision,
-		&record.SupportsStreaming, &record.SupportsSystemPrompt, &record.SupportsTools,
-		&record.ContextWindow, &record.MaxOutputTokens,
+		&record.SupportsImageOutput, &record.SupportsImageAPI, &record.SupportsStreaming, &record.SupportsSystemPrompt,
+		&record.SupportsTools, &record.ContextWindow, &record.MaxOutputTokens,
 		&record.Request, &record.InputToken, &record.OutputToken, &record.ReasoningToken,
 		&record.CreatedAt, &record.UpdatedAt, &route, &record.ReasoningStyle,
 		&record.Hidden, &tiers,

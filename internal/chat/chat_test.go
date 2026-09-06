@@ -19,6 +19,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/config"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/group"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/model"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/provider"
@@ -223,7 +224,7 @@ func newFixture(t *testing.T) *fixture {
 		conversations: conversations,
 		models:        models,
 		users:         users,
-		service:       NewService(db, conversations, models, registry, set),
+		service:       NewService(db, conversations, models, registry, set, gallery.NewStore(db)),
 		upstream:      upstream,
 		account:       account,
 		other:         other,
@@ -879,7 +880,7 @@ func TestUpdateMessage(t *testing.T) {
 
 func TestUpdateMessageHandler(t *testing.T) {
 	f := newFixture(t)
-	handlers := NewHandlers(f.service, f.conversations)
+	handlers := NewHandlers(f.service, f.conversations, gallery.NewStore(f.db))
 	mux := http.NewServeMux()
 	handlers.Routes(mux)
 

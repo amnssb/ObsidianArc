@@ -26,6 +26,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/config"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/group"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/httpx"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/mail"
@@ -102,7 +103,8 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	requestLog := reqlog.NewStore(db)
 	keys := apikey.NewStore(db)
 	quotaService := quota.NewService(db, quota.NewStore(db), settingsService)
-	chatService := chat.NewService(db, conversations, models, registry, settingsService)
+	gallery := gallery.NewStore(db)
+	chatService := chat.NewService(db, conversations, models, registry, settingsService, gallery)
 
 	// The one check that decides whether an account may spend anything, and
 	// the release that undoes what it claimed. Shared with the API surface
@@ -229,7 +231,7 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 
 	auth.NewHandlers(authService, users, groups, preferences, settingsService, proxyTrust).Routes(mux)
 	model.NewHandlers(models).Routes(mux)
-	chatHandlers := chat.NewHandlers(chatService, conversations)
+	chatHandlers := chat.NewHandlers(chatService, conversations, gallery)
 	// The one condition that must hold for an account to spend anything,
 	// shared by the turn and by the upload that precedes it.
 	chatHandlers.Uploadable = func(_ context.Context, account user.User) error {

@@ -1019,6 +1019,266 @@
   cursor: default;
 }
 
+/* --- image studio ------------------------------------------------------------------
+   A full page at /images, reached from the composer's + menu. Generation is not a
+   conversation, so it gets its own surface: one centered column for the composer and
+   a responsive grid of everything this account has generated. It is drawn inside the
+   shared shell, so the header keeps its place; only the content below changes. */
+
+.ai-images {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: min(880px, 100%);
+  margin: 0 auto;
+  padding: 26px 20px 48px;
+}
+
+.ai-images-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-images-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+}
+
+.ai-images-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ai-text-secondary);
+}
+
+.ai-images-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 18px;
+  background: var(--ai-surface-container);
+}
+
+.ai-images-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ai-text-secondary);
+}
+
+/* The model row is pills, not a list: on this page an image model is one of a
+   handful, and a pill names it in one line where a list would spend three. */
+.ai-images-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-images-model {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ai-surface-container-high);
+  color: var(--ai-text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+
+.ai-images-model:hover {
+  background: var(--ai-field-bg-hover);
+}
+
+.ai-images-model.selected {
+  background: var(--ai-primary);
+  color: var(--ai-primary-text);
+}
+
+.ai-images-empty {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ai-text-secondary);
+}
+
+.ai-images-halves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.ai-images-half {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-images-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-images-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-images-pill {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ai-surface-container-high);
+  color: var(--ai-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+
+.ai-images-pill:hover {
+  background: var(--ai-field-bg-hover);
+}
+
+.ai-images-pill.selected {
+  background: var(--ai-primary);
+  color: var(--ai-primary-text);
+}
+
+.ai-images-prompt,
+.ai-images-extra {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 11px;
+  border: none;
+  border-radius: 11px;
+  background: var(--ai-field-bg);
+  color: var(--ai-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.ai-images-prompt:focus,
+.ai-images-extra:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ai-focus-shadow);
+}
+
+.ai-images-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-images-generate {
+  padding: 9px 26px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ai-primary);
+  color: var(--ai-primary-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.13s ease;
+}
+
+.ai-images-generate:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-images-generate:not(:disabled):hover {
+  background: var(--ai-primary-hover);
+}
+
+.ai-images-status {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ai-danger);
+}
+
+.ai-images-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The gallery fills the page width in an auto-fill grid, so two tiles sit on a
+   phone and five on a wide monitor without a media query. The tile buttons stay
+   visible rather than appearing on hover — the same lesson the code-copy
+   button taught. */
+.ai-images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.ai-images-tile {
+  position: relative;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--ai-field-bg);
+}
+
+.ai-images-tile img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ai-images-tile-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.ai-images-tile-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--ai-surface-card);
+  color: var(--ai-text-secondary);
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+
+.ai-images-tile-btn:hover {
+  color: var(--ai-text);
+  background: var(--ai-surface-container-high);
+}
+
+.ai-images-tile-btn.armed {
+  background: var(--ai-surface-card);
+  color: var(--ai-danger);
+}
+
+.ai-images-tile-caption {
+  padding: 7px 10px;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--ai-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- narrow skin: a compact widget, e.g. embedded in a sidebar or popover -------- */
 
 .ai-chat-narrow .ai-chat-sidebar {

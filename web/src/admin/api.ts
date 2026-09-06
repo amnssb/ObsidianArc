@@ -93,6 +93,8 @@ export interface AdminModel {
   supports_reasoning: boolean;
   supports_images: boolean;
   supports_vision: boolean;
+  supports_image_output: boolean;
+  supports_image_api: boolean;
   supports_streaming: boolean;
   supports_system_prompt: boolean;
   supports_tools: boolean;

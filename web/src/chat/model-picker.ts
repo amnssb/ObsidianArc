@@ -26,6 +26,10 @@ export interface ModelCapabilities {
   supports_reasoning: boolean;
   supports_images: boolean;
   supports_vision: boolean;
+  /** The model's answer carries pictures — the image toolbox lists these. */
+  supports_image_output: boolean;
+  /** The provider exposes it on a native images endpoint — listed too. */
+  supports_image_api: boolean;
   supports_streaming: boolean;
   supports_system_prompt: boolean;
   supports_tools: boolean;

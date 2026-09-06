@@ -28,6 +28,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/adapter"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/id"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/model"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/settings"
@@ -40,6 +41,8 @@ type Service struct {
 	models        *model.Store
 	registry      *adapter.Registry
 	settings      *settings.Service
+	// Where generated pictures live. Only the image toolbox writes here.
+	gallery *gallery.Store
 	// Called once per completed turn, whatever its outcome. Phase 5 hangs the
 	// usage ledger here; nil until then.
 	OnTurn func(context.Context, TurnRecord)
@@ -56,6 +59,7 @@ func NewService(
 	models *model.Store,
 	registry *adapter.Registry,
 	set *settings.Service,
+	gallery *gallery.Store,
 ) *Service {
 	return &Service{
 		db:            db,
@@ -63,6 +67,7 @@ func NewService(
 		models:        models,
 		registry:      registry,
 		settings:      set,
+		gallery:       gallery,
 	}
 }
 
@@ -519,17 +524,19 @@ type finished struct {
 
 func (s *Service) finishOK(ctx context.Context, f finished, emit Emit) error {
 	stats := buildStats(f)
+	answer, images := s.generatedImages(ctx, f)
 
 	message, err := s.conversations.Append(ctx, nil, conversation.AppendInput{
 		ConversationID: f.prepared.conversationID,
 		UserID:         f.request.User.ID,
 		Role:           conversation.RoleAssistant,
-		Content:        f.answer,
+		Content:        answer,
 		Reasoning:      f.reasoning,
 		ModelID:        f.resolved.Model.ID,
 		ModelName:      f.resolved.Model.DisplayName,
 		ProviderID:     f.resolved.Provider.ID,
 		Stats:          stats,
+		AttachmentIDs:  images,
 	})
 	if err != nil {
 		return err
@@ -561,15 +568,17 @@ func (s *Service) finishFailed(ctx, requestCtx context.Context, f finished, chat
 			return nil
 		}
 		stats := buildStats(f)
+		answer, images := s.generatedImages(ctx, f)
 		message, err := s.conversations.Append(ctx, nil, conversation.AppendInput{
 			ConversationID: f.prepared.conversationID,
 			UserID:         f.request.User.ID,
 			Role:           conversation.RoleAssistant,
-			Content:        f.answer,
+			Content:        answer,
 			Reasoning:      f.reasoning,
 			ModelID:        f.resolved.Model.ID,
 			ProviderID:     f.resolved.Provider.ID,
 			Stats:          stats,
+			AttachmentIDs:  images,
 		})
 		if err != nil {
 			return err
@@ -603,6 +612,18 @@ func (s *Service) finishFailed(ctx, requestCtx context.Context, f finished, chat
 	s.record(ctx, f, message.ID, StatusError, code)
 
 	return emit(EventError, ErrorPayload{Code: code, Message: friendly, MessageID: message.ID})
+}
+
+// generatedImages lifts the pictures an image-capable model delivered inline
+// in its answer, returning the answer without them and their attachment ids.
+// Text-only models never see this path, so an answer that merely quotes a
+// data URL is stored as the text it is. A stop mid-picture matches nothing
+// and changes nothing — only a complete image is lifted.
+func (s *Service) generatedImages(ctx context.Context, f finished) (string, []string) {
+	if !f.resolved.Model.SupportsImageOutput || !strings.Contains(f.answer, "data:image/") {
+		return f.answer, nil
+	}
+	return s.liftImages(ctx, f.request.User.ID, f.answer)
 }
 
 func (s *Service) record(ctx context.Context, f finished, messageID string, status Status, code string) {

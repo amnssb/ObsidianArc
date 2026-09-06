@@ -207,6 +207,8 @@ type modelRequest struct {
 	SupportsReasoning    *bool `json:"supports_reasoning"`
 	SupportsImages       *bool `json:"supports_images"`
 	SupportsVision       *bool `json:"supports_vision"`
+	SupportsImageOutput  *bool `json:"supports_image_output"`
+	SupportsImageAPI     *bool `json:"supports_image_api"`
 	SupportsStreaming    *bool `json:"supports_streaming"`
 	SupportsSystemPrompt *bool `json:"supports_system_prompt"`
 	SupportsTools        *bool `json:"supports_tools"`
@@ -312,6 +314,8 @@ func (h *Handlers) updateModel(w http.ResponseWriter, r *http.Request) error {
 		SupportsReasoning:    body.SupportsReasoning,
 		SupportsImages:       body.SupportsImages,
 		SupportsVision:       body.SupportsVision,
+		SupportsImageOutput:  body.SupportsImageOutput,
+		SupportsImageAPI:     body.SupportsImageAPI,
 		SupportsStreaming:    body.SupportsStreaming,
 		SupportsSystemPrompt: body.SupportsSystemPrompt,
 		SupportsTools:        body.SupportsTools,
@@ -421,6 +425,8 @@ func applyModelFields(
 	setIf(&capabilities.SupportsReasoning, body.SupportsReasoning)
 	setIf(&capabilities.SupportsImages, body.SupportsImages)
 	setIf(&capabilities.SupportsVision, body.SupportsVision)
+	setIf(&capabilities.SupportsImageOutput, body.SupportsImageOutput)
+	setIf(&capabilities.SupportsImageAPI, body.SupportsImageAPI)
 	setIf(&capabilities.SupportsStreaming, body.SupportsStreaming)
 	setIf(&capabilities.SupportsSystemPrompt, body.SupportsSystemPrompt)
 	setIf(&capabilities.SupportsTools, body.SupportsTools)

@@ -13,6 +13,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/adapter"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/auth"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/httpx"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/id"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/model"
@@ -24,6 +25,8 @@ import (
 type Handlers struct {
 	service       *Service
 	conversations *conversation.Store
+	// Read directly by the gallery routes; written only by the service.
+	gallery *gallery.Store
 	// Consulted before an upload is stored. Optional; nil means every
 	// signed-in account may upload. Wired to the same check that gates
 	// sending, because this endpoint writes too.
@@ -39,8 +42,8 @@ type Handlers struct {
 	MaxUploadBytes func() int64
 }
 
-func NewHandlers(service *Service, conversations *conversation.Store) *Handlers {
-	return &Handlers{service: service, conversations: conversations}
+func NewHandlers(service *Service, conversations *conversation.Store, gallery *gallery.Store) *Handlers {
+	return &Handlers{service: service, conversations: conversations, gallery: gallery}
 }
 
 func (h *Handlers) Routes(mux *http.ServeMux) {
@@ -59,6 +62,11 @@ func (h *Handlers) Routes(mux *http.ServeMux) {
 
 	mux.Handle("POST /api/attachments", protected(h.uploadAttachment))
 	mux.Handle("GET /api/attachments/{id}", protected(h.getAttachment))
+
+	mux.Handle("POST /api/images", protected(h.generateImage))
+	mux.Handle("GET /api/images", protected(h.listImages))
+	mux.Handle("GET /api/images/{id}", protected(h.getGalleryImage))
+	mux.Handle("DELETE /api/images/{id}", protected(h.deleteGalleryImage))
 }
 
 // --- chat ---------------------------------------------------------------------
@@ -455,4 +463,95 @@ func translateConversationError(err error) error {
 	default:
 		return httpx.Internal(err)
 	}
+}
+
+// --- image toolbox -------------------------------------------------------------
+
+type imageGenerateRequest struct {
+	ModelID string `json:"model_id"`
+	Prompt  string `json:"prompt"`
+	Ratio   string `json:"ratio"`
+	Count   int    `json:"count"`
+}
+
+// generateImage runs one generation and answers with what was stored. Unlike
+// the chat endpoint this is an ordinary request/response: the browser waits,
+// the panel shows a spinner, and errors arrive as plain JSON.
+func (h *Handlers) generateImage(w http.ResponseWriter, r *http.Request) error {
+	account := auth.MustUser(r.Context())
+
+	var body imageGenerateRequest
+	if err := httpx.DecodeJSON(w, r, &body, 16*1024); err != nil {
+		return err
+	}
+	if body.ModelID != "" && !id.Valid(body.ModelID) {
+		return httpx.BadRequest("Malformed model id.")
+	}
+
+	images, err := h.service.GenerateImages(r.Context(), account, GenerateRequest{
+		ModelID: body.ModelID,
+		Prompt:  body.Prompt,
+		Ratio:   body.Ratio,
+		Count:   body.Count,
+	})
+	if err != nil {
+		// The spend check's refusals are already person-shaped httpx errors;
+		// everything upstream went through the gateway's own classifier.
+		return err
+	}
+	if images == nil {
+		images = []gallery.Image{}
+	}
+	return httpx.WriteJSON(w, http.StatusOK, map[string]any{"images": images})
+}
+
+func (h *Handlers) listImages(w http.ResponseWriter, r *http.Request) error {
+	account := auth.MustUser(r.Context())
+	images, err := h.gallery.List(r.Context(), account.ID)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	if images == nil {
+		images = []gallery.Image{}
+	}
+	return httpx.WriteJSON(w, http.StatusOK, map[string]any{"images": images})
+}
+
+func (h *Handlers) getGalleryImage(w http.ResponseWriter, r *http.Request) error {
+	account := auth.MustUser(r.Context())
+	imageID, err := pathID(r)
+	if err != nil {
+		return err
+	}
+
+	image, data, err := h.gallery.Open(r.Context(), account.ID, imageID)
+	if err != nil {
+		return err
+	}
+
+	header := w.Header()
+	header.Set("Content-Type", image.MIME)
+	header.Set("Content-Length", strconv.Itoa(len(data)))
+	// Private: the URL is user-scoped, and a shared cache must not serve one
+	// person's image to another.
+	header.Set("Cache-Control", "private, max-age=31536000, immutable")
+	// The bytes are model output, so they are never rendered as a document.
+	header.Set("Content-Disposition", "inline")
+	header.Set("X-Content-Type-Options", "nosniff")
+
+	http.ServeContent(w, r, "", time.Time{}, newReaderAt(data))
+	return nil
+}
+
+func (h *Handlers) deleteGalleryImage(w http.ResponseWriter, r *http.Request) error {
+	account := auth.MustUser(r.Context())
+	imageID, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	if err := h.gallery.Delete(r.Context(), account.ID, imageID); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

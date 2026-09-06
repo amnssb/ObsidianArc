@@ -29,6 +29,14 @@ type anthropicAdapter struct{}
 
 func (anthropicAdapter) Kind() Kind { return KindAnthropic }
 
+// Anthropic has no images endpoint, so there is nothing to fall back to. The
+// error names that rather than pretending to try: the model picker should not
+// have offered an images-API model on this provider kind to begin with, and
+// this message is what an operator who did anyway sees.
+func (anthropicAdapter) Images(ctx context.Context, client *http.Client, p Provider, req ImagesRequest) ([]GeneratedImage, error) {
+	return nil, &Error{Kind: ErrorInvalidRequest, Message: "This provider kind does not offer an images endpoint."}
+}
+
 type anthropicMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`

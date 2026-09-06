@@ -222,6 +222,7 @@ function capabilityBadges(model: AdminModel): HTMLElement {
     model.supports_reasoning ? badge(t('canThinks'), 'muted') : null,
     model.supports_vision ? badge(t('canSees'), 'muted') : null,
     model.supports_images && !model.supports_vision ? badge(t('canImages'), 'muted') : null,
+    model.supports_image_output || model.supports_image_api ? badge(t('canDraw'), 'muted') : null,
     model.supports_streaming ? null : badge(t('canNoStream'), 'muted'),
     model.route_to_id ? badge(t('routedBadge'), 'muted') : null,
   );
@@ -315,6 +316,16 @@ function editModel(
   const vision = switchField({
     label: t('capVision'),
     value: existing?.supports_vision ?? false,
+  });
+  const imageOutput = switchField({
+    label: t('capImageOutput'),
+    value: existing?.supports_image_output ?? false,
+    hint: t('capImageOutputHint'),
+  });
+  const imageAPI = switchField({
+    label: t('capImageAPI'),
+    value: existing?.supports_image_api ?? false,
+    hint: t('capImageAPIHint'),
   });
   const streaming = switchField({ label: t('capStreams'), value: existing?.supports_streaming ?? true });
   const systemPrompt = switchField({ label: t('capSystemPrompt'), value: existing?.supports_system_prompt ?? true });
@@ -433,6 +444,8 @@ function editModel(
       body.appendChild(reasoning.element);
       body.appendChild(images.element);
       body.appendChild(vision.element);
+      body.appendChild(imageOutput.element);
+      body.appendChild(imageAPI.element);
       body.appendChild(streaming.element);
       body.appendChild(systemPrompt.element);
       body.appendChild(tools.element);
@@ -475,6 +488,8 @@ function editModel(
         supports_reasoning: reasoning.value(),
         supports_images: images.value(),
         supports_vision: vision.value(),
+        supports_image_output: imageOutput.value(),
+        supports_image_api: imageAPI.value(),
         supports_streaming: streaming.value(),
         supports_system_prompt: systemPrompt.value(),
         supports_tools: tools.value(),

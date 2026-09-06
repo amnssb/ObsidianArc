@@ -219,6 +219,24 @@ type RemoteModel struct {
 	DisplayName string
 }
 
+// ImagesRequest is one call against a provider's native images endpoint.
+// Size is the endpoint's own size string; the caller maps its presets onto
+// whatever the endpoint family actually accepts.
+type ImagesRequest struct {
+	Model  string
+	Prompt string
+	N      int
+	Size   string
+}
+
+// GeneratedImage is one picture an images endpoint returned. The MIME type is
+// derived from the bytes themselves — the wire format carries none, and an
+// image that sniffs as nothing is not one this server will store.
+type GeneratedImage struct {
+	MIME string
+	Data []byte
+}
+
 // Sink receives events as they arrive. Returning an error stops the stream —
 // which is how a disconnected client cancels an upstream request.
 type Sink func(Event) error
@@ -226,6 +244,7 @@ type Sink func(Event) error
 type Adapter interface {
 	Kind() Kind
 	Chat(ctx context.Context, client *http.Client, p Provider, req ChatRequest, sink Sink) (Result, error)
+	Images(ctx context.Context, client *http.Client, p Provider, req ImagesRequest) ([]GeneratedImage, error)
 	ListModels(ctx context.Context, client *http.Client, p Provider) ([]RemoteModel, error)
 }
 
@@ -286,6 +305,14 @@ func (r *Registry) Chat(ctx context.Context, p Provider, req ChatRequest, sink S
 		return Result{}, &Error{Kind: ErrorInvalidRequest, Message: "Unknown provider type " + string(p.Kind) + "."}
 	}
 	return adapter.Chat(ctx, r.client, p, req, sink)
+}
+
+func (r *Registry) Images(ctx context.Context, p Provider, req ImagesRequest) ([]GeneratedImage, error) {
+	adapter, ok := r.adapters[p.Kind]
+	if !ok {
+		return nil, &Error{Kind: ErrorInvalidRequest, Message: "Unknown provider type " + string(p.Kind) + "."}
+	}
+	return adapter.Images(ctx, r.client, p, req)
 }
 
 func (r *Registry) ListModels(ctx context.Context, p Provider) ([]RemoteModel, error) {

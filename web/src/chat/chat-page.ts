@@ -117,6 +117,7 @@ export function renderChatPage(root: HTMLElement): HTMLElement {
     root: shell.body,
     getStatus: status,
     onOpenSetup: () => navigate('/admin/providers'),
+    onImageToolbox: () => navigate('/images'),
     composerControl: picker.element,
     showStats,
     canDelete,

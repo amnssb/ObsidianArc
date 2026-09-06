@@ -262,6 +262,69 @@ func (u openAIUsage) toUsage() Usage {
 	}
 }
 
+// Images calls the endpoint's native images API — the protocol family that
+// gpt-image-1 and friends live on, and which refuses chat/completions
+// outright. b64_json is requested explicitly because dall-e style endpoints
+// default to links, and a link is useless here: it can expire before the
+// reader clicks it, and fetching it server-side would be this server
+// requesting whatever URL a provider put in a response.
+func (openAIAdapter) Images(ctx context.Context, client *http.Client, p Provider, req ImagesRequest) ([]GeneratedImage, error) {
+	if req.N < 1 {
+		req.N = 1
+	}
+	endpoint := imagesEndpoint(p.BaseURL)
+	body := map[string]any{
+		"model":           req.Model,
+		"prompt":          req.Prompt,
+		"n":               req.N,
+		"response_format": "b64_json",
+	}
+	if req.Size != "" {
+		body["size"] = req.Size
+	}
+
+	response, err := postJSON(ctx, client, p, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= 400 {
+		return nil, classifyHTTP(p, endpoint, response.StatusCode,
+			response.Header.Get("Retry-After"), readErrorBody(response), false)
+	}
+
+	var payload struct {
+		Data []struct {
+			B64 string `json:"b64_json"`
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return nil, &Error{Kind: ErrorUpstream, Message: "The provider returned a response we could not read.", cause: err}
+	}
+
+	images := make([]GeneratedImage, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		if item.B64 == "" {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(item.B64)
+		if err != nil {
+			return nil, &Error{Kind: ErrorUpstream, Message: "The provider returned an image we could not decode.", cause: err}
+		}
+		if mime := sniffImage(data); mime != "" {
+			images = append(images, GeneratedImage{MIME: mime, Data: data})
+		}
+	}
+	if len(images) == 0 {
+		// Either an empty list or a list of links: whatever the endpoint
+		// meant, there is no picture in it for the reader.
+		return nil, &Error{Kind: ErrorUpstream, Message: "The provider returned no usable image data."}
+	}
+	return images, nil
+}
+
 type openAIStreamChunk struct {
 	Choices []struct {
 		Delta struct {

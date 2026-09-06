@@ -117,6 +117,8 @@ export interface ChatOptions {
   showStats?(): boolean;
   /** False hides the delete controls. The server refuses them regardless. */
   canDelete?(): boolean;
+  /** Opens the image studio. Routing is the host's business, not the composer's. */
+  onImageToolbox?(): void;
 }
 
 export interface ChatHandle {
@@ -252,6 +254,9 @@ export function mountChat(options: ChatOptions): ChatHandle {
   const menu: ComposerMenu = createComposerMenu({
     onPickImages: () => fileInput.click(),
     onPickFiles: () => docInput.click(),
+    // Generation is a page of its own, not a column beside the transcript:
+    // the composer only points at it.
+    onImageToolbox: () => options.onImageToolbox?.(),
     enabled: () => !busy && status.configured,
     imagesAvailable: () => status.vision,
   });
@@ -696,6 +701,11 @@ export function mountChat(options: ChatOptions): ChatHandle {
     const answer = el('div', 'ai-answer');
     renderInto(answer, message.content);
     row.appendChild(answer);
+
+    // A model that draws delivers its pictures as attachments the gateway
+    // stored — the same strip a user's own images travel in.
+    const drawn = message.attachments ?? [];
+    if (drawn.length) row.appendChild(renderAttachmentStrip(drawn));
 
     const actions = el('div', 'ai-msg-actions');
     if (!busy) {

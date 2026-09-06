@@ -85,6 +85,35 @@ func chatEndpoint(kind Kind, base string) string {
 	return trimmed + "/chat/completions"
 }
 
+// imagesEndpoint mirrors chatEndpoint's tolerance for half-typed base URLs:
+// a base ending in the images path is taken as documented in full, and one
+// ending in the chat path has it replaced.
+func imagesEndpoint(base string) string {
+	trimmed := strings.TrimRight(base, "/")
+	if strings.HasSuffix(trimmed, "/images/generations") {
+		return trimmed
+	}
+	return strings.TrimSuffix(trimmed, "/chat/completions") + "/images/generations"
+}
+
+// sniffImage reads the media type off the bytes themselves. The images wire
+// format carries no content type, and trusting whatever the response claims
+// is how a misconfigured endpoint turns an HTML error page into an "image".
+func sniffImage(data []byte) string {
+	switch {
+	case len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}):
+		return "image/png"
+	case len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff:
+		return "image/jpeg"
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return "image/webp"
+	case len(data) >= 6 && string(data[:3]) == "GIF" && (data[3] == '7' || data[3] == '9'):
+		return "image/gif"
+	default:
+		return ""
+	}
+}
+
 func modelsEndpoint(kind Kind, base string) string {
 	trimmed := strings.TrimRight(base, "/")
 	if kind == KindAnthropic {

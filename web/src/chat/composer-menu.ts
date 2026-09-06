@@ -32,6 +32,8 @@ export interface ReasoningState {
 export interface ComposerMenuOptions {
   onPickImages(): void;
   onPickFiles(): void;
+  /** Opens the image toolbox beside the transcript. */
+  onImageToolbox(): void;
   /** False while a turn is running, or before a model is available. */
   enabled(): boolean;
   imagesAvailable(): boolean;
@@ -69,6 +71,15 @@ export function createComposerMenu(options: ComposerMenuOptions): ComposerMenu {
       onSelect: () => {
         close();
         options.onPickFiles();
+      },
+    }));
+
+    panel.appendChild(menuItem({
+      title: t('imageToolbox'),
+      leading: icon(ICONS.spark, 14),
+      onSelect: () => {
+        close();
+        options.onImageToolbox();
       },
     }));
 
