@@ -206,6 +206,88 @@ export async function renderSettings(view: AdminView): Promise<void> {
     hint: t('instanceSystemPromptHint'),
   });
 
+  const healthProbe = switchField({
+    label: t('healthProbe'),
+    value: values['health.probe'] !== 'false',
+    hint: t('healthProbeHint'),
+  });
+  const healthWindow = numberField({
+    label: t('healthWindow'),
+    value: Number(values['health.window_minutes'] ?? 30),
+    min: 1,
+    hint: t('healthWindowHint'),
+  });
+  const healthDisableAfter = numberField({
+    label: t('healthDisableAfter'),
+    value: Number(values['health.disable_after'] ?? 0),
+    min: 0,
+    hint: t('healthDisableAfterHint'),
+  });
+  const healthRetainDays = numberField({
+    label: t('healthRetainDays'),
+    value: Number(values['health.retain_days'] ?? 14),
+    min: 1,
+    hint: t('healthRetainDaysHint'),
+  });
+
+  const healthDisableBelow = numberField({
+    label: t('healthDisableBelow'),
+    value: Number(values['health.disable_below'] ?? 0),
+    min: 0,
+    max: 100,
+    hint: t('healthDisableBelowHint'),
+  });
+  const healthShowUsers = switchField({
+    label: t('healthShowUsers'),
+    value: values['health.show_users'] === 'true',
+    hint: t('healthShowUsersHint'),
+  });
+  const healthWarnBelow = numberField({
+    label: t('healthWarnBelow'),
+    value: Number(values['health.warn_below'] ?? 90),
+    min: 0,
+    max: 100,
+    hint: t('healthWarnBelowHint'),
+  });
+
+  const signupsPerIP = numberField({
+    label: t('signupsPerIP'),
+    value: Number(values['registration.per_ip'] ?? 0),
+    min: 0,
+    hint: t('signupsPerIPHint'),
+  });
+  const signupsIPWindow = numberField({
+    label: t('signupsIPWindow'),
+    value: Number(values['registration.per_ip_window_minutes'] ?? 60),
+    min: 1,
+    hint: t('signupsIPWindowHint'),
+  });
+
+  const turnstileSiteKey = textField({
+    label: t('turnstileSiteKey'),
+    value: values['turnstile.site_key'] ?? '',
+    placeholder: '0x4AAAAAAA…',
+    hint: t('turnstileSiteKeyHint'),
+    monospace: true,
+  });
+  const turnstileSecret = textField({
+    label: t('turnstileSecretKey'),
+    value: '',
+    placeholder: values['turnstile.secret_key'] ? values['turnstile.secret_key'] : '0x4AAAAAAA…',
+    hint: t('turnstileSecretHint'),
+    monospace: true,
+  });
+  const turnstileOnSignup = switchField({
+    label: t('turnstileOnSignup'),
+    value: values['turnstile.on_signup'] === 'true',
+    hint: t('turnstileOnSignupHint'),
+  });
+  const turnstileOnAPIKey = switchField({
+    label: t('turnstileOnAPIKey'),
+    value: values['turnstile.on_api_key'] === 'true',
+    hint: t('turnstileOnAPIKeyHint'),
+  });
+
   const attachmentMaxMB = numberField({
     label: t('attachmentMaxMB'),
     value: Number(values['attachments.max_mb'] ?? 6),
@@ -327,6 +409,14 @@ export async function renderSettings(view: AdminView): Promise<void> {
   form.appendChild(qqRequirement.element);
   form.appendChild(perMinute.element);
   form.appendChild(perHour.element);
+  form.appendChild(signupsPerIP.element);
+  form.appendChild(signupsIPWindow.element);
+
+  form.appendChild(section(t('secTurnstile'), t('turnstileHint')));
+  form.appendChild(turnstileSiteKey.element);
+  form.appendChild(turnstileSecret.element);
+  form.appendChild(turnstileOnSignup.element);
+  form.appendChild(turnstileOnAPIKey.element);
 
   form.appendChild(section(t('secLanding')));
   form.appendChild(landingMode.element);
@@ -353,6 +443,15 @@ export async function renderSettings(view: AdminView): Promise<void> {
   form.appendChild(purgeDailyAt.element);
   form.appendChild(orphanMinutes.element);
   form.appendChild(heldPanel(data.attachments));
+
+  form.appendChild(section(t('secLiveness'), t('livenessHint')));
+  form.appendChild(healthProbe.element);
+  form.appendChild(healthWindow.element);
+  form.appendChild(healthDisableAfter.element);
+  form.appendChild(healthDisableBelow.element);
+  form.appendChild(healthWarnBelow.element);
+  form.appendChild(healthShowUsers.element);
+  form.appendChild(healthRetainDays.element);
 
   form.appendChild(section(t('apiKeys')));
   form.appendChild(apiEnabled.element);
@@ -401,11 +500,26 @@ export async function renderSettings(view: AdminView): Promise<void> {
       'chat.default_system_prompt': systemPrompt.value(),
       'chat.max_turns': String(maxTurns.value() ?? 40),
       'api.enabled': String(apiEnabled.value()),
+      'turnstile.site_key': turnstileSiteKey.value(),
+      // Empty keeps what is stored: the field was never shown the secret, so
+      // sending its emptiness back would erase it.
+      'turnstile.secret_key': turnstileSecret.value(),
+      'turnstile.on_signup': String(turnstileOnSignup.value()),
+      'turnstile.on_api_key': String(turnstileOnAPIKey.value()),
+      'registration.per_ip': String(signupsPerIP.value() ?? 0),
+      'registration.per_ip_window_minutes': String(signupsIPWindow.value() ?? 60),
       'attachments.max_mb': String(attachmentMaxMB.value() ?? 6),
       'attachments.retain': String(attachmentRetain.value()),
       'attachments.purge_after_days': String(purgeAfterDays.value() ?? 0),
       'attachments.purge_daily_at': purgeDailyAt.value(),
       'attachments.orphan_minutes': String(orphanMinutes.value() ?? 60),
+      'health.probe': String(healthProbe.value()),
+      'health.window_minutes': String(healthWindow.value() ?? 30),
+      'health.disable_after': String(healthDisableAfter.value() ?? 0),
+      'health.retain_days': String(healthRetainDays.value() ?? 14),
+      'health.disable_below': String(healthDisableBelow.value() ?? 0),
+      'health.show_users': String(healthShowUsers.value()),
+      'health.warn_below': String(healthWarnBelow.value() ?? 0),
     };
   }
 

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/adapter"
@@ -28,6 +29,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/group"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/health"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/httpx"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/mail"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/model"
@@ -37,6 +39,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/secret"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/settings"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/trial"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/turnstile"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/usage"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/user"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/web"
@@ -60,6 +63,7 @@ type Server struct {
 	conversations *conversation.Store
 	quota         *quota.Service
 	requests      *reqlog.Store
+	health        *health.Checker
 }
 
 func New(ctx context.Context, deps Deps) (*Server, error) {
@@ -97,6 +101,7 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	providers := provider.NewStore(db, box)
 	models := model.NewStore(db, providers)
 	registry := adapter.NewRegistry(cfg.Upstream)
+	healthStore := health.NewStore(db)
 	conversations := conversation.NewStore(db)
 	announcements := announcement.NewStore(db)
 	usageStore := usage.NewStore(db)
@@ -230,7 +235,64 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	}))
 
 	auth.NewHandlers(authService, users, groups, preferences, settingsService, proxyTrust).Routes(mux)
-	model.NewHandlers(models).Routes(mux)
+	modelHandlers := model.NewHandlers(models)
+	// What readers are told about liveness, decided here because it is the
+	// operator's policy and neither the model package nor the health one has
+	// any business reading settings.
+	//
+	// Cached for half a minute: this runs on every model listing, which the
+	// chat asks for on load, and the underlying figure moves on a ten-minute
+	// sweep. Thirty seconds is far fresher than the data behind it.
+	var (
+		livenessMu   sync.Mutex
+		livenessAt   time.Time
+		livenessSeen map[string]model.Liveness
+	)
+	modelHandlers.Liveness = func(ctx context.Context) map[string]model.Liveness {
+		show := settingsService.Bool(settings.HealthShowUsers)
+		warnBelow := settingsService.Int(settings.HealthWarnBelow, 0)
+		if !show && warnBelow <= 0 {
+			return nil
+		}
+
+		livenessMu.Lock()
+		defer livenessMu.Unlock()
+		if time.Since(livenessAt) < 30*time.Second {
+			return livenessSeen
+		}
+
+		window := time.Duration(settingsService.Int(settings.HealthWindowMins, 30)) * time.Minute
+		// A reader's window is the day, not the sweep's: "unstable" should
+		// mean the model has been unreliable, not that it missed once in the
+		// last half hour.
+		if window < 24*time.Hour {
+			window = 24 * time.Hour
+		}
+		rates, err := healthStore.Rates(ctx, time.Now().Add(-window).UnixMilli())
+		if err != nil {
+			slog.ErrorContext(ctx, "liveness for readers", "error", err)
+			return livenessSeen
+		}
+
+		seen := make(map[string]model.Liveness, len(rates))
+		for modelID, rate := range rates {
+			// Too little evidence to say anything with. Silence is the
+			// honest answer, and a warning nobody can act on is worse.
+			if rate.Total < health.MinSamplesToJudge {
+				continue
+			}
+			share := rate.Share()
+			entry := model.Liveness{Unstable: warnBelow > 0 && share*100 < float64(warnBelow)}
+			if show {
+				value := share
+				entry.Uptime = &value
+			}
+			seen[modelID] = entry
+		}
+		livenessSeen, livenessAt = seen, time.Now()
+		return seen
+	}
+	modelHandlers.Routes(mux)
 	chatHandlers := chat.NewHandlers(chatService, conversations, gallery)
 	// The one condition that must hold for an account to spend anything,
 	// shared by the turn and by the upload that precedes it.
@@ -266,7 +328,22 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	// interface; the compatibility surface is what the key is then presented
 	// to, and the two are separate because one is a browser screen and the
 	// other is not a browser at all.
+	// One client for both challenges, so a burst of registrations reuses the
+	// connection to Cloudflare rather than opening one per attempt.
+	challengeClient := &http.Client{}
+	authService.Challenge = turnstile.Gate{
+		Client:  challengeClient,
+		Enabled: func() bool { return settingsService.Bool(settings.TurnstileOnSignup) },
+		Secret:  func() string { return settingsService.Get(settings.TurnstileSecretKey) },
+	}
+
 	apiKeyHandlers := apikey.NewHandlers(keys)
+	apiKeyHandlers.Challenge = turnstile.Gate{
+		Client:  challengeClient,
+		Enabled: func() bool { return settingsService.Bool(settings.TurnstileOnAPIKey) },
+		Secret:  func() string { return settingsService.Get(settings.TurnstileSecretKey) },
+	}
+	apiKeyHandlers.ClientIP = func(r *http.Request) string { return httpx.ClientIP(r, proxyTrust) }
 	apiKeyHandlers.Allowed = func(r *http.Request) error {
 		account, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -304,7 +381,7 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	compatHandlers.Routes(mux)
 	announcement.NewHandlers(announcements).Routes(mux)
 	trial.NewHandlers(settingsService, models, registry, proxyTrust, cfg.SecretKey).Routes(mux)
-	admin.NewHandlers(db, users, groups, providers, models, settingsService, registry, authService, usageStore, quotaService, conversations, announcements, keys, requestLog, cards).Routes(mux)
+	admin.NewHandlers(db, users, groups, providers, models, settingsService, registry, authService, usageStore, quotaService, conversations, announcements, keys, requestLog, cards, healthStore).Routes(mux)
 
 	// Anything under /api that no module claimed is a client bug, and should
 	// read as one instead of quietly returning the SPA shell.
@@ -336,7 +413,14 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 		// on the wire rather than what the handler produced. Outside
 		// everything that writes a body, so there is one place that decides.
 		httpx.Compress(),
-		httpx.SecurityHeaders(cfg.Dev, web.InlineScriptHashes()),
+		httpx.SecurityHeaders(cfg.Dev, web.InlineScriptHashes(), func() bool {
+			// Exactly when a widget can appear. A key with both switches off
+			// draws nothing, and an instance that draws nothing keeps the
+			// policy it had before this feature existed.
+			return settingsService.Get(settings.TurnstileSiteKey) != "" &&
+				(settingsService.Bool(settings.TurnstileOnSignup) ||
+					settingsService.Bool(settings.TurnstileOnAPIKey))
+		}),
 		httpx.SameOrigin(cfg.AllowedOrigins),
 		// Last, so the session lookup only happens for requests that survived
 		// the origin check.
@@ -360,6 +444,9 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 		conversations: conversations,
 		quota:         quotaService,
 		requests:      requestLog,
+		health: &health.Checker{
+			Store: healthStore, Models: models, Providers: providers, Registry: registry,
+		},
 	}, nil
 }
 
@@ -454,6 +541,29 @@ func (s *Server) sweep(ctx context.Context) {
 	// Counter buckets whose window has long since rolled over. The ledger is
 	// never pruned: it is the audit trail.
 	_, _ = s.quota.PruneCounters(sweepCtx)
+	s.sweepHealth(ctx)
+}
+
+// sweepHealth asks the models nobody has used lately whether they still work,
+// and acts on the answer.
+//
+// Its own context, not the 30-second one above: a pass talks to every
+// provider an instance has, and one slow upstream must not cut the pass short
+// for the models after it. The policy is read here rather than captured at
+// boot, so a change in the settings screen lands on the next pass.
+func (s *Server) sweepHealth(ctx context.Context) {
+	if s.health == nil {
+		return
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	s.health.Run(healthCtx, health.Policy{
+		Probe:        s.settings.Bool(settings.HealthProbe),
+		Window:       time.Duration(s.settings.Int(settings.HealthWindowMins, 30)) * time.Minute,
+		DisableAfter: s.settings.Int(settings.HealthDisableAfter, 0),
+		Retain:       time.Duration(s.settings.Int(settings.HealthRetainDays, 14)) * 24 * time.Hour,
+	})
 }
 
 // sweepAttachments applies the operator's retention policy: the orphan

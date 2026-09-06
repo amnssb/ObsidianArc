@@ -43,21 +43,49 @@ const (
 	EmailDomains          = "registration.email_domains"
 	SignupsPerMinute      = "registration.per_minute"
 	SignupsPerHour        = "registration.per_hour"
-	AdminsBypassQuota     = "quota.admins_bypass"
-	UsageDisplay          = "quota.usage_display"
-	LandingMode           = "landing.mode"
-	LandingIntro          = "landing.intro"
-	TrialEnabled          = "landing.trial_enabled"
-	TrialTurns            = "landing.trial_turns"
-	TrialModel            = "landing.trial_model"
-	DefaultSystemPrompt   = "chat.default_system_prompt"
-	ConversationMaxTurns  = "chat.max_turns"
-	APIEnabled            = "api.enabled"
-	AttachmentMaxMB       = "attachments.max_mb"
-	AttachmentRetain      = "attachments.retain"
-	AttachmentPurgeDays   = "attachments.purge_after_days"
-	AttachmentPurgeDaily  = "attachments.purge_daily_at"
-	AttachmentOrphanMins  = "attachments.orphan_minutes"
+	// Per address, unlike the two above, which are one counter for the whole
+	// instance: a flood from one place should not lock out everybody else.
+	SignupsPerIP       = "registration.per_ip"
+	SignupsIPWindowMin = "registration.per_ip_window_minutes"
+
+	// Cloudflare Turnstile. The site key is public — it is in the page's
+	// markup — and the secret is write-only: it is redacted out of every
+	// response, the way a provider's API key is.
+	TurnstileSiteKey     = "turnstile.site_key"
+	TurnstileSecretKey   = "turnstile.secret_key"
+	TurnstileOnSignup    = "turnstile.on_signup"
+	TurnstileOnAPIKey    = "turnstile.on_api_key"
+	AdminsBypassQuota    = "quota.admins_bypass"
+	UsageDisplay         = "quota.usage_display"
+	LandingMode          = "landing.mode"
+	LandingIntro         = "landing.intro"
+	TrialEnabled         = "landing.trial_enabled"
+	TrialTurns           = "landing.trial_turns"
+	TrialModel           = "landing.trial_model"
+	DefaultSystemPrompt  = "chat.default_system_prompt"
+	ConversationMaxTurns = "chat.max_turns"
+	APIEnabled           = "api.enabled"
+	AttachmentMaxMB      = "attachments.max_mb"
+	AttachmentRetain     = "attachments.retain"
+	AttachmentPurgeDays  = "attachments.purge_after_days"
+	AttachmentPurgeDaily = "attachments.purge_daily_at"
+	AttachmentOrphanMins = "attachments.orphan_minutes"
+
+	// Liveness. The window is both "how far back counts as evidence" and
+	// "how quiet a model has to be before the system asks it directly",
+	// because those are the same question asked from two sides.
+	HealthProbe        = "health.probe"
+	HealthWindowMins   = "health.window_minutes"
+	HealthDisableAfter = "health.disable_after"
+	HealthRetainDays   = "health.retain_days"
+	// A second way to disable: not "it failed three times running" but "it
+	// has been failing one turn in four all afternoon". A model can be badly
+	// broken without ever failing twice in a row.
+	HealthDisableBelow = "health.disable_below"
+	// What readers are told. Off by default: an availability figure is an
+	// operator's own record of their instance, and publishing it is a choice.
+	HealthShowUsers = "health.show_users"
+	HealthWarnBelow = "health.warn_below"
 	// Written by the janitor rather than by a form, so that a restart does
 	// not lose track of whether today's purge already happened. Readable in
 	// the settings response and deliberately absent from the writable set.
@@ -157,8 +185,20 @@ var Defaults = map[string]string{
 	EmailDomains: "",
 	// Zero means unthrottled. An instance that has closed
 	// registration needs neither, so neither is on by default.
-	SignupsPerMinute:     "0",
-	SignupsPerHour:       "0",
+	SignupsPerMinute: "0",
+	SignupsPerHour:   "0",
+	// Off until an operator sets it. A limit guessed on their behalf is a
+	// limit that locks out a university or an office behind one address.
+	SignupsPerIP:       "0",
+	SignupsIPWindowMin: "60",
+	TurnstileSiteKey:   "",
+	TurnstileSecretKey: "",
+	// Off, and off even once the keys are filled in: an operator pasting keys
+	// is configuring, not yet switching on, and a challenge that appeared the
+	// moment a key was saved would lock out the half-finished setup it was
+	// saved during.
+	TurnstileOnSignup:    "false",
+	TurnstileOnAPIKey:    "false",
 	AdminsBypassQuota:    "true",
 	UsageDisplay:         UsageAbsolute,
 	LandingMode:          LandingLogin,
@@ -168,6 +208,22 @@ var Defaults = map[string]string{
 	TrialModel:           "",
 	DefaultSystemPrompt:  "",
 	ConversationMaxTurns: "40",
+	// On: asking a model nobody has used costs one token and answers the
+	// question the liveness column exists for. Off, a quiet model reads as
+	// "no data" forever, which is the state this feature was built to end.
+	HealthProbe:      "true",
+	HealthWindowMins: "30",
+	// Off. Turning a model off on the system's own judgement is a decision an
+	// operator has to make deliberately — the failure mode of guessing is an
+	// instance that quietly stops offering the model everyone uses.
+	HealthDisableAfter: "0",
+	HealthRetainDays:   "14",
+	HealthDisableBelow: "0",
+	HealthShowUsers:    "false",
+	// A model failing one turn in ten is worth warning about before somebody
+	// types a long question into it. Off would be the safer default and a
+	// worse one: nobody switches on a warning they have not been bitten by.
+	HealthWarnBelow: "90",
 	// Off until an operator says otherwise: it opens a second way to spend
 	// the instance's provider credit, one that no longer goes through a
 	// browser session.

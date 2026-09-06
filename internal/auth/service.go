@@ -14,6 +14,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/group"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/mail"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/settings"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/turnstile"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/user"
 )
 
@@ -21,6 +22,7 @@ var (
 	ErrInvalidCredentials   = errors.New("auth: incorrect username or password")
 	ErrAccountDisabled      = errors.New("auth: this account has been disabled")
 	ErrRegistrationClosed   = errors.New("auth: registration is closed on this server")
+	ErrSignupIPBlocked      = errors.New("auth: too many accounts have been created from this address")
 	ErrEmailRequired        = errors.New("auth: an email address is required to register here")
 	ErrPasswordUnchanged    = errors.New("auth: the new password is the same as the current one")
 	ErrCurrentPasswordWrong = errors.New("auth: current password is incorrect")
@@ -36,6 +38,10 @@ type Service struct {
 	cfg      config.Session
 	limiter  *Limiter
 	signups  *signupGate
+	// Set by the wiring when the operator has switched a challenge on. The
+	// zero value is off, so a build that never wires it up simply has no
+	// challenge rather than a broken one.
+	Challenge turnstile.Gate
 	// Optional. Nil, or configured with no host, means every feature
 	// that needs mail reports itself as unavailable rather than
 	// failing halfway through.
@@ -76,6 +82,8 @@ type RegisterInput struct {
 	Nickname string
 	IP       string
 	UA       string
+	// Turnstile's token, when the operator has switched the challenge on.
+	Turnstile string
 }
 
 // Register creates an account and signs it in. The first account on an empty
@@ -133,6 +141,19 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, st
 		}
 	}
 
+	// Before the transaction, and before hashing: this is a call to
+	// Cloudflare, and a transaction never spans a network round trip to
+	// somebody else's server. Hashing is deliberate work and there is no
+	// reason to do it for a request that has already failed.
+	//
+	// After the first-account check above, so a fresh instance is never
+	// locked out of its own setup by a challenge nobody could pass yet.
+	if total > 0 {
+		if err := s.Challenge.Check(ctx, in.Turnstile, in.IP); err != nil {
+			return user.User{}, "", err
+		}
+	}
+
 	hash, err := s.hasher.Hash(ctx, in.Password)
 	if err != nil {
 		return user.User{}, "", err
@@ -183,6 +204,18 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, st
 			if !allowed {
 				return &SignupThrottleError{RetryAfter: retryAfter}
 			}
+
+			// Per address, and counted in the database inside the lock this
+			// transaction already holds — so the count and the insert cannot
+			// interleave, a restart does not hand out a fresh allowance, and
+			// two instances against one database agree.
+			//
+			// Unlike the two limits above, this one refuses rather than asks
+			// the caller to wait: somebody who has just made ten accounts
+			// does not want to hear about a retry.
+			if err := s.checkSignupIP(ctx, tx, in.IP); err != nil {
+				return err
+			}
 		}
 
 		usernameTaken, emailTaken, qqTaken, err := s.users.Exists(ctx, tx, in.Username, in.Email, in.QQ)
@@ -223,6 +256,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (user.User, st
 			GroupID:      groupID,
 			Status:       user.StatusActive,
 			Unverified:   unverified,
+			SignupIP:     in.IP,
 		})
 		if err != nil {
 			return err
@@ -634,4 +668,33 @@ func (s *Service) TokenFrom(r *http.Request) string {
 		return ""
 	}
 	return cookie.Value
+}
+
+// checkSignupIP enforces the per-address registration limit.
+//
+// Zero is off, and stays off: an operator who has not set a number has not
+// asked for this, and a limit guessed on their behalf is one that locks out a
+// university or an office behind a single address.
+func (s *Service) checkSignupIP(ctx context.Context, q database.Queryer, ip string) error {
+	limit := s.settings.Int(settings.SignupsPerIP, 0)
+	if limit <= 0 || strings.TrimSpace(ip) == "" {
+		return nil
+	}
+
+	minutes := s.settings.Int(settings.SignupsIPWindowMin, 60)
+	if minutes <= 0 {
+		minutes = 60
+	}
+	since := time.Now().Add(-time.Duration(minutes) * time.Minute).UnixMilli()
+
+	count, err := s.users.CountFromIP(ctx, q, ip, since)
+	if err != nil {
+		return err
+	}
+	// The limit is how many may exist, so the one that would make it the
+	// limit-plus-first is the one refused.
+	if count >= limit {
+		return ErrSignupIPBlocked
+	}
+	return nil
 }

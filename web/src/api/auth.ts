@@ -25,6 +25,9 @@ export interface Account {
   // endpoints that act; these decide only what is worth drawing.
   allow_stats: boolean;
   allow_delete_conversations: boolean;
+  /** Where the account registered from. Administrators only; '' where it
+   *  could not be resolved, and on accounts created before it was recorded. */
+  signup_ip?: string;
 }
 
 // What a visitor with no account is shown at the address. The server settles
@@ -53,6 +56,10 @@ export interface SiteInfo {
   email_domains?: string[];
   require_qq?: boolean;
   qq_requirement?: 'off' | 'optional' | 'required';
+  /** Served only where a challenge is actually switched on. */
+  turnstile_site_key?: string;
+  turnstile_on_signup?: boolean;
+  turnstile_on_api_key?: boolean;
   // Whether a new account has to confirm its address before it can
   // send anything. False whenever the server cannot post mail,
   // whatever the setting says.
@@ -99,6 +106,7 @@ export interface RegisterInput {
   email?: string;
   qq?: string;
   nickname?: string;
+  turnstile?: string;
 }
 
 export function register(input: RegisterInput): Promise<{ user: Account }> {
@@ -108,6 +116,7 @@ export function register(input: RegisterInput): Promise<{ user: Account }> {
     email: input.email ?? '',
     qq: input.qq ?? '',
     nickname: input.nickname ?? '',
+    turnstile: input.turnstile ?? '',
   });
 }
 

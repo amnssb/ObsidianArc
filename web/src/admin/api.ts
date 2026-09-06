@@ -73,6 +73,9 @@ export interface AdminModel {
   provider_name: string;
   provider_kind: ProviderKind;
   model_id: string;
+  api_name: string;
+  system_prompt: string;
+  auto_disabled: boolean;
   display_name: string;
   description: string;
   avatar: string;
@@ -259,10 +262,85 @@ export interface LogFacets {
 /** How a breakdown is ranked. Three defensible answers to "the most". */
 export type UsageMetric = 'requests' | 'tokens' | 'credits';
 
+export interface UserStorage {
+  user_id: string;
+  name: string;
+  count: number;
+  bytes: number;
+}
+
+export interface Resources {
+  storage: {
+    held_bytes: number;
+    held_count: number;
+    discarded_count: number;
+    by_user: UserStorage[];
+  };
+  memory: {
+    heap_bytes: number;
+    heap_sys_bytes: number;
+    sys_bytes: number;
+    gc_count: number;
+    gc_pause_ms: number;
+    goroutines: number;
+  };
+  // percent, window_sec and process_sec are absent where the platform has no
+  // answer, and percent is absent on the first read of a process: a rate
+  // needs two samples and there has only been one.
+  cpu: {
+    cores: number;
+    gomaxprocs: number;
+    process_sec?: number;
+    percent?: number;
+    window_sec?: number;
+  };
+  sampled_at: number;
+}
+
+/** One model's liveness, as the backoffice reads it. */
+export interface ModelHealth {
+  model_id: string;
+  name: string;
+  provider: string;
+  enabled: boolean;
+  /** True when the system turned it off, which is the only kind it turns on. */
+  auto_disabled: boolean;
+  status: {
+    state: 'up' | 'down' | 'unknown';
+    uptime: number;
+    samples: number;
+    user_samples: number;
+    system_samples: number;
+    failures_in_a_row: number;
+    last_ok_at: number;
+    last_error_at: number;
+    last_code: string;
+    last_message: string;
+    errors: Array<{ code: string; message: string; count: number; last_at: number }>;
+  };
+}
+
+/** What one account is holding in reset cards. */
+export interface CardHolding {
+  available: number;
+  used: number;
+  expired: number;
+  total: number;
+  /** The unused, unexpired ones, soonest to expire first. */
+  cards: Array<{ id: string; source: string; expires_at: number; created_at: number }>;
+}
+
 export const adminApi = {
   dashboard: (metric: UsageMetric = 'credits') =>
     api.get<Dashboard>(`/api/admin/dashboard?metric=${metric}`),
   meta: () => api.get<Meta>('/api/admin/meta'),
+  health: (hours = 24) =>
+    api.get<{
+      hours: number;
+      models: ModelHealth[];
+      policy: { probe: boolean; window_mins: number; disable_after: number };
+    }>(`/api/admin/health?hours=${hours}`),
+  resources: () => api.get<Resources>('/api/admin/resources'),
 
   users: (query: string) => api.get<{ users: Account[]; total: number }>(`/api/admin/users${query}`),
   user: (id: string) =>
@@ -271,6 +349,7 @@ export const adminApi = {
       usage: UsageSummary;
       lifetime: UsageTotals;
       policy: QuotaPolicy;
+      cards: CardHolding;
     }>(`/api/admin/users/${id}`),
   updateUser: (id: string, patch: Record<string, unknown>) =>
     api.patch<{ user: Account }>(`/api/admin/users/${id}`, patch),
@@ -312,6 +391,9 @@ export const adminApi = {
       `/api/admin/models${providerID ? `?provider_id=${providerID}` : ''}`,
     ),
   createModel: (body: Record<string, unknown>) => api.post<{ model: AdminModel }>('/api/admin/models', body),
+  importModels: (models: unknown[]) =>
+    api.post<{ created: number; updated: number; skipped: string[] }>(
+      '/api/admin/models/import', { models }),
   updateModel: (id: string, body: Record<string, unknown>) =>
     api.patch<{ model: AdminModel }>(`/api/admin/models/${id}`, body),
   codes: () => api.get<{ codes: RedemptionCode[] }>('/api/admin/codes'),

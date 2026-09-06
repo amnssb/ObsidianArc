@@ -23,6 +23,7 @@ import {
   adminApi,
   emptyPolicy,
   type Account,
+  type CardHolding,
   type ApiKey,
   type AccountStatus,
   type Group,
@@ -66,23 +67,23 @@ export async function renderUsers(view: AdminView): Promise<void> {
     { value: '', label: t('anyRole') },
     { value: 'user', label: t('filterUsers') },
     { value: 'admin', label: t('filterAdmins') },
-  ], state.role);
+  ], state.role, () => refresh());
 
   const statusSelect = filterSelect([
     { value: '', label: t('anyStatus') },
     { value: 'active', label: t('filterActive') },
     { value: 'disabled', label: t('filterDisabled') },
-  ], state.status);
+  ], state.status, () => refresh());
 
   const groupSelect = filterSelect([
     { value: '', label: t('anyGroup') },
     ...groups.map((group) => ({ value: group.id, label: group.name })),
-  ], state.group);
+  ], state.group, () => refresh());
 
   filters.appendChild(search);
-  filters.appendChild(roleSelect);
-  filters.appendChild(statusSelect);
-  filters.appendChild(groupSelect);
+  filters.appendChild(roleSelect.element);
+  filters.appendChild(statusSelect.element);
+  filters.appendChild(groupSelect.element);
   view.body.appendChild(filters);
 
   const results = el('div');
@@ -93,19 +94,15 @@ export async function renderUsers(view: AdminView): Promise<void> {
   let debounce = 0;
   const refresh = () => {
     state.q = search.value.trim();
-    state.role = roleSelect.value;
-    state.status = statusSelect.value;
-    state.group = groupSelect.value;
+    state.role = roleSelect.value();
+    state.status = statusSelect.value();
+    state.group = groupSelect.value();
     void load(view, groups, results);
   };
   search.addEventListener('input', () => {
     window.clearTimeout(debounce);
     debounce = window.setTimeout(refresh, 250);
   });
-  for (const select of [roleSelect, statusSelect, groupSelect]) {
-    select.addEventListener('change', refresh);
-  }
-
   await load(view, groups, results);
 }
 
@@ -235,6 +232,7 @@ async function openUser(view: AdminView, groups: Group[], userID: string): Promi
         }),
     build: (body) => {
       body.appendChild(summary(account, detail.lifetime));
+      body.appendChild(identity(account));
 
       // The same bars the account sees in its own composer, from the same
       // summary: an administrator answering "why can this person not send
@@ -245,6 +243,12 @@ async function openUser(view: AdminView, groups: Group[], userID: string): Promi
         body.appendChild(section(t('secAllowance')));
         body.appendChild(allowance);
       }
+
+      // What they are holding, before the control that adds more: an operator
+      // is usually here because somebody asked, and "you already have two"
+      // is the answer more often than a third card is.
+      body.appendChild(section(t('secHeldCards')));
+      body.appendChild(cardHolding(detail.cards));
 
       // Straight to this account, without a code in between. Beside the
       // figures it changes, because "why does this person have no allowance
@@ -529,4 +533,62 @@ async function removeUser(view: AdminView, account: Account, panel: PanelHandle)
     panel.setBusy(false);
     panel.setError(error instanceof ApiError ? error.message : String(error));
   }
+}
+
+/** How many resets an account is holding, and when they run out. */
+function cardHolding(held: CardHolding): HTMLElement {
+  const wrap = el('div');
+
+  if (held.total === 0) {
+    wrap.appendChild(el('p', 'oa-field-hint', t('cardsNone')));
+    return wrap;
+  }
+
+  wrap.appendChild(el('p', 'oa-card-count', t('cardsAvailable', { count: held.available })));
+  // The three together, because "none left" and "never had any" are
+  // different answers and the first number alone cannot tell them apart.
+  wrap.appendChild(el('p', 'oa-field-hint',
+    t('cardsBreakdown', { used: held.used, expired: held.expired, total: held.total })));
+
+  if (!held.cards.length) return wrap;
+
+  const list = el('div', 'oa-card-list');
+  for (const card of held.cards) {
+    const row = el('div', 'oa-card-row');
+    row.appendChild(el('span', 'oa-card-source',
+      card.source === 'grant' ? t('cardFromAdmin') : t('cardFromCode')));
+    row.appendChild(el('span', 'oa-card-expiry',
+      card.expires_at > 0 ? t('cardExpires', { when: relativeTime(card.expires_at) }) : t('noLimit')));
+    list.appendChild(row);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/**
+ * The facts about an account that are read rather than edited.
+ *
+ * The id first, because it is the one an operator has to paste somewhere: a
+ * log line, a support thread, a URL. Monospace and selectable — a ULID that
+ * has to be transcribed by eye is a ULID that gets transcribed wrong.
+ */
+function identity(account: Account): HTMLElement {
+  const wrap = el('div', 'oa-facts');
+
+  const rows: Array<[string, string, boolean]> = [
+    [t('colUID'), account.id, true],
+    [t('colRegistered'), absoluteTime(account.created_at), false],
+    [t('colLastSeen'), account.last_login_at ? absoluteTime(account.last_login_at) : t('neverSignedIn'), false],
+  ];
+  // Only where it was recorded: accounts predating the column have none, and
+  // an empty row reads as a missing value rather than an absent one.
+  if (account.signup_ip) rows.push([t('colSignupIP'), account.signup_ip, true]);
+
+  for (const [label, value, mono] of rows) {
+    const row = el('div', 'oa-fact');
+    row.appendChild(el('span', 'oa-fact-label', label));
+    row.appendChild(el('span', `oa-fact-value${mono ? ' mono' : ''}`, value));
+    wrap.appendChild(row);
+  }
+  return wrap;
 }

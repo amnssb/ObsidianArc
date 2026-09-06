@@ -6,12 +6,13 @@
 // composer stops offering attachments, or the thinking toggle disappears.
 
 import { ApiError } from '../api/client';
+import { pickJSONFile, saveAsFile } from '../api/backup';
 import { t } from '../i18n';
 import { ICONS, button, clear, el, iconButton } from '../ui/dom';
 import { openPanel, type PanelHandle } from '../ui/panel';
 import { numberField, section, selectField, switchField, textArea, textField, tierList } from '../ui/form';
 import { badge, badges, compactNumber, renderTable, stacked, type SortState } from '../ui/table';
-import { adminApi, type AdminModel, type Group, type Meta, type Provider, type ReasoningStyle, type ReasoningTier } from './api';
+import { adminApi, type AdminModel, type ModelHealth, type Group, type Meta, type Provider, type ReasoningStyle, type ReasoningTier } from './api';
 import { failure, filterSelect, type AdminView } from './admin-page';
 import { reasoningLabel } from './providers';
 
@@ -68,6 +69,10 @@ export async function renderModels(view: AdminView): Promise<void> {
   let providers: Provider[];
   let groups: Group[];
   let meta: Meta;
+  // Liveness is read beside the catalogue rather than as part of it: it is a
+  // different question with a different shape, and a failure to answer it
+  // must not take the models screen down with it.
+  let health = new Map<string, ModelHealth>();
   try {
     [{ models }, { providers }, { groups }, meta] = await Promise.all([
       adminApi.models(),
@@ -79,14 +84,52 @@ export async function renderModels(view: AdminView): Promise<void> {
     failure(view, error);
     return;
   }
+  try {
+    const report = await adminApi.health();
+    health = new Map(report.models.map((entry) => [entry.model_id, entry]));
+  } catch {
+    // The column simply says nothing. An operator came here to edit models.
+  }
 
   const nameOf = (modelID: string) =>
     models.find((entry) => entry.id === modelID)?.display_name ?? modelID;
 
   clear(view.actions);
-  const add = button('oa-btn primary', t('addModel'), () => editModel(view, providers, models, groups, meta, null));
+  const add = button('oa-btn primary', t('addModel'), () => editModel(view, providers, models, groups, meta, null, undefined));
   add.disabled = providers.length === 0;
   if (!providers.length) add.title = t('addProviderFirst');
+
+  const download = button('oa-btn', t('exportModels'), () => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    saveAsFile(`obsidian-arc-models-${stamp}.json`,
+      JSON.stringify({ version: 1, models: models.map((row) => portable(row, models, groups)) }, null, 2));
+  });
+  download.disabled = models.length === 0;
+
+  const upload = button('oa-btn', t('importModels'), () => {
+    void pickJSONFile(4 * 1024 * 1024)
+      .then((file) => {
+        if (file === null) return null;
+        const listed = (file as { models?: unknown }).models;
+        if (!Array.isArray(listed)) throw new ApiError(0, 'malformed', t('importModelsMalformed'));
+        upload.disabled = true;
+        return adminApi.importModels(listed);
+      })
+      .then((result) => {
+        if (!result) return;
+        // Every refusal, not a count of them: "3 skipped" sends an operator
+        // back to the file with nothing to look for.
+        const note = t('importModelsDone', { created: result.created, updated: result.updated });
+        view.reload();
+        if (result.skipped.length) window.setTimeout(() => report(view, note, result.skipped), 60);
+        else window.setTimeout(() => report(view, note, []), 60);
+      })
+      .catch((error: unknown) => report(view, error instanceof ApiError ? error.message : String(error), []))
+      .finally(() => { upload.disabled = false; });
+  });
+
+  view.actions.appendChild(download);
+  view.actions.appendChild(upload);
   view.actions.appendChild(add);
 
   clear(view.body);
@@ -103,7 +146,7 @@ export async function renderModels(view: AdminView): Promise<void> {
   const providerSelect = filterSelect([
     { value: '', label: t('anyProvider') },
     ...providers.map((provider) => ({ value: provider.id, label: provider.name })),
-  ], filters.provider);
+  ], filters.provider, () => applyFilters());
 
   const stateSelect = filterSelect([
     { value: '', label: t('anyStatus') },
@@ -111,11 +154,11 @@ export async function renderModels(view: AdminView): Promise<void> {
     { value: 'disabled', label: t('disabled') },
     { value: 'hidden', label: t('filterHidden') },
     { value: 'routed', label: t('filterRouted') },
-  ], filters.state);
+  ], filters.state, () => applyFilters());
 
   bar.appendChild(search);
-  bar.appendChild(providerSelect);
-  bar.appendChild(stateSelect);
+  bar.appendChild(providerSelect.element);
+  bar.appendChild(stateSelect.element);
   bar.appendChild(el('span', 'oa-filter-note', t('dragToOrder')));
   bar.hidden = models.length === 0;
   view.body.appendChild(bar);
@@ -125,19 +168,17 @@ export async function renderModels(view: AdminView): Promise<void> {
 
   const paint = (): void => {
     clear(results);
-    results.appendChild(table(view, providers, models, groups, meta, nameOf, paint));
+    results.appendChild(table(view, providers, models, groups, meta, health, nameOf, paint));
   };
 
   search.addEventListener('input', () => {
     filters.q = search.value.trim();
     paint();
   });
-  for (const select of [providerSelect, stateSelect]) {
-    select.addEventListener('change', () => {
-      filters.provider = providerSelect.value;
-      filters.state = stateSelect.value as ModelFilters['state'];
-      paint();
-    });
+  function applyFilters(): void {
+    filters.provider = providerSelect.value();
+    filters.state = stateSelect.value() as ModelFilters['state'];
+    paint();
   }
 
   paint();
@@ -149,6 +190,7 @@ function table(
   models: AdminModel[],
   groups: Group[],
   meta: Meta,
+  health: Map<string, ModelHealth>,
   nameOf: (modelID: string) => string,
   repaint: () => void,
 ): HTMLElement {
@@ -171,6 +213,18 @@ function table(
           row.route_to_id ? t('routedTo', { name: nameOf(row.route_to_id) }) : row.model_id,
         ),
         sort: (row) => row.display_name,
+      },
+      {
+        header: t('colUptime'),
+        cell: (row) => uptimeCell(health.get(row.id)),
+        width: '104px',
+        // Worst first when sorted: the reason to sort this column is to find
+        // what is broken, and unknown is not broken.
+        sort: (row) => {
+          const status = health.get(row.id)?.status;
+          if (!status || status.samples === 0) return 2;
+          return status.uptime;
+        },
       },
       {
         header: t('colProvider'),
@@ -213,7 +267,7 @@ function table(
       ? t('addProviderFirst')
       : models.length ? t('noModelsMatch') : t('noModels'),
     muted: (row) => !row.enabled,
-    onSelect: (row) => editModel(view, providers, models, groups, meta, row),
+    onSelect: (row) => editModel(view, providers, models, groups, meta, row, health.get(row.id)),
   });
 }
 
@@ -241,26 +295,53 @@ function editModel(
   groups: Group[],
   meta: Meta,
   existing: AdminModel | null,
+  /** This model's liveness, when it has any. Absent on the create form. */
+  status: ModelHealth | undefined = undefined,
+  /**
+   * Values to start from when creating. A copy of a model is the create form
+   * with somebody else's answers already in it: the operator changes what
+   * makes this one different — which is at least the provider or the model
+   * id, because a provider cannot list one upstream model twice — and saves.
+   */
+  template: AdminModel | null = null,
 ): void {
   const creating = existing === null;
+  // Where the fields start. `existing` still decides everything else: the
+  // title, the delete button, and whether saving is a POST or a PATCH.
+  const source = existing ?? template;
 
   const providerID = selectField({
     label: t('colProvider'),
-    value: existing?.provider_id ?? providers[0]?.id ?? '',
+    value: source?.provider_id ?? providers[0]?.id ?? '',
     options: providers.map((provider) => ({ value: provider.id, label: provider.name })),
   });
 
   const modelID = textField({
     label: t('modelIDLabel'),
-    value: existing?.model_id ?? '',
+    value: source?.model_id ?? '',
     placeholder: 'anthropic/claude-opus-5',
     hint: t('modelIDHint'),
     monospace: true,
   });
 
+  const apiName = textField({
+    label: t('apiNameLabel'),
+    value: existing?.api_name ?? '',
+    placeholder: source?.model_id || 'gpt-5.6-sol',
+    hint: t('apiNameHint'),
+    monospace: true,
+  });
+
+  const modelPrompt = textArea({
+    label: t('modelPromptLabel'),
+    value: source?.system_prompt ?? '',
+    rows: 4,
+    hint: t('modelPromptHint'),
+  });
+
   const displayName = textField({
     label: t('displayName'),
-    value: existing?.display_name ?? '',
+    value: source?.display_name ?? '',
     placeholder: 'Claude Opus 5',
     hint: t('displayNameHint'),
     maxLength: 80,
@@ -268,23 +349,23 @@ function editModel(
 
   const description = textArea({
     label: t('description'),
-    value: existing?.description ?? '',
+    value: source?.description ?? '',
     placeholder: t('modelDescriptionPlaceholder'),
     rows: 2,
     hint: t('modelDescriptionHint'),
   });
 
-  const enabled = switchField({ label: t('enabled'), value: existing?.enabled ?? true });
+  const enabled = switchField({ label: t('enabled'), value: source?.enabled ?? true });
   const hidden = switchField({
     label: t('modelHidden'),
-    value: existing?.hidden ?? false,
+    value: source?.hidden ?? false,
     hint: t('modelHiddenHint'),
   });
-  const sortOrder = numberField({ label: t('sortOrder'), value: existing?.sort_order ?? 0 });
+  const sortOrder = numberField({ label: t('sortOrder'), value: source?.sort_order ?? 0 });
 
   const initialGroupGrants: Record<string, 'use' | 'view'> = {};
-  if (existing?.group_grants) {
-    for (const grant of existing.group_grants) {
+  if (source?.group_grants) {
+    for (const grant of source.group_grants) {
       if (grant.access === 'use' || grant.access === 'view') {
         initialGroupGrants[grant.group_id] = grant.access;
       }
@@ -305,41 +386,41 @@ function editModel(
 
   const reasoning = switchField({
     label: t('capReasoning'),
-    value: existing?.supports_reasoning ?? false,
+    value: source?.supports_reasoning ?? false,
     hint: t('capReasoningHint'),
   });
   const images = switchField({
     label: t('capImages'),
-    value: existing?.supports_images ?? false,
+    value: source?.supports_images ?? false,
     hint: t('capImagesHint'),
   });
   const vision = switchField({
     label: t('capVision'),
-    value: existing?.supports_vision ?? false,
+    value: source?.supports_vision ?? false,
   });
   const imageOutput = switchField({
     label: t('capImageOutput'),
-    value: existing?.supports_image_output ?? false,
+    value: source?.supports_image_output ?? false,
     hint: t('capImageOutputHint'),
   });
   const imageAPI = switchField({
     label: t('capImageAPI'),
-    value: existing?.supports_image_api ?? false,
+    value: source?.supports_image_api ?? false,
     hint: t('capImageAPIHint'),
   });
-  const streaming = switchField({ label: t('capStreams'), value: existing?.supports_streaming ?? true });
-  const systemPrompt = switchField({ label: t('capSystemPrompt'), value: existing?.supports_system_prompt ?? true });
-  const tools = switchField({ label: t('capTools'), value: existing?.supports_tools ?? false });
+  const streaming = switchField({ label: t('capStreams'), value: source?.supports_streaming ?? true });
+  const systemPrompt = switchField({ label: t('capSystemPrompt'), value: source?.supports_system_prompt ?? true });
+  const tools = switchField({ label: t('capTools'), value: source?.supports_tools ?? false });
 
   const contextWindow = numberField({
     label: t('contextWindow'),
-    value: existing?.context_window ?? null,
+    value: source?.context_window ?? null,
     placeholder: '200000',
     min: 0,
   });
   const maxOutput = numberField({
     label: t('maxOutputTokens'),
-    value: existing?.max_output_tokens ?? null,
+    value: source?.max_output_tokens ?? null,
     placeholder: '8192',
     min: 0,
   });
@@ -349,7 +430,7 @@ function editModel(
   // what the second link says. The server refuses both as well.
   const routeTo = selectField({
     label: t('routeTo'),
-    value: existing?.route_to_id ?? '',
+    value: source?.route_to_id ?? '',
     hint: t('routeToHint'),
     options: [
       { value: '', label: t('routeNone') },
@@ -362,11 +443,11 @@ function editModel(
     ],
   });
 
-  const tiers = reasoningTiersField(existing?.reasoning_tiers ?? []);
+  const tiers = reasoningTiersField(source?.reasoning_tiers ?? []);
 
   const reasoningStyle = selectField<ReasoningStyle | ''>({
     label: t('reasoningStyleModel'),
-    value: existing?.reasoning_style ?? '',
+    value: source?.reasoning_style ?? '',
     hint: t('reasoningStyleModelHint'),
     options: [
       { value: '', label: t('styleInherit') },
@@ -376,26 +457,26 @@ function editModel(
 
   const requestWeight = numberField({
     label: t('perRequest'),
-    value: existing?.request_weight ?? 0,
+    value: source?.request_weight ?? 0,
     step: 0.1,
     min: 0,
     hint: t('perRequestHint'),
   });
   const inputWeight = numberField({
     label: t('per1kInput'),
-    value: existing?.input_token_weight ?? 1,
+    value: source?.input_token_weight ?? 1,
     step: 0.1,
     min: 0,
   });
   const outputWeight = numberField({
     label: t('per1kOutput'),
-    value: existing?.output_token_weight ?? 1,
+    value: source?.output_token_weight ?? 1,
     step: 0.1,
     min: 0,
   });
   const reasoningWeight = numberField({
     label: t('per1kReasoning'),
-    value: existing?.reasoning_token_weight ?? 1,
+    value: source?.reasoning_token_weight ?? 1,
     step: 0.1,
     min: 0,
   });
@@ -404,6 +485,23 @@ function editModel(
     host: view.host,
     title: creating ? t('addModel') : existing.display_name,
     confirmLabel: creating ? t('add') : t('save'),
+    ...(existing
+      ? {
+          actions: [
+            iconButton('oa-icon-btn', ICONS.copy, t('duplicate'), () => {
+              panel.close();
+              // The API name is dropped rather than suffixed: it is unique
+              // across the instance, and a guessed one would be a second
+              // public name nobody asked for.
+              editModel(view, providers, models, groups, meta, null, undefined, {
+                ...existing,
+                api_name: '',
+                display_name: t('copyOfName', { name: existing.display_name }),
+              });
+            }),
+          ],
+        }
+      : {}),
     ...(existing
       ? {
           destructive: {
@@ -431,11 +529,16 @@ function editModel(
         body.appendChild(readOnly(t('colProvider'), existing.provider_name));
       }
       body.appendChild(modelID.element);
+      body.appendChild(apiName.element);
       body.appendChild(displayName.element);
       body.appendChild(description.element);
+      body.appendChild(modelPrompt.element);
       body.appendChild(enabled.element);
       body.appendChild(hidden.element);
       body.appendChild(sortOrder.element);
+
+      const liveness = healthSection(status);
+      if (liveness) body.appendChild(liveness);
 
       body.appendChild(section(t('secGroupAccess')));
       body.appendChild(groupAccess.element);
@@ -480,6 +583,8 @@ function editModel(
         reasoning_style: reasoningStyle.value(),
         reasoning_tiers: tiers.value(),
         model_id: modelID.value(),
+        api_name: apiName.value(),
+        system_prompt: modelPrompt.value(),
         display_name: displayName.value(),
         description: description.value(),
         enabled: enabled.value(),
@@ -502,6 +607,9 @@ function editModel(
         group_grants: groupGrants,
       };
       if (creating) payload['provider_id'] = providerID.value();
+      // The avatar has no field in this form, so a copy would silently lose
+      // one that had been set through the API.
+      if (template) payload['avatar'] = template.avatar;
 
       handle.setBusy(true);
       try {
@@ -689,5 +797,113 @@ export function readOnly(label: string, value: string): HTMLElement {
   const wrap = el('div', 'oa-field');
   wrap.appendChild(el('span', 'oa-field-label', label));
   wrap.appendChild(el('span', 'oa-field-hint', value));
+  return wrap;
+}
+
+/**
+ * One model as a file can carry it: names where the database has ids, because
+ * a ULID means nothing on the instance this is being taken to.
+ */
+function portable(row: AdminModel, all: AdminModel[], groups: Group[]): Record<string, unknown> {
+  const target = row.route_to_id ? all.find((entry) => entry.id === row.route_to_id) : undefined;
+  const groupName = (id: string) => groups.find((group) => group.id === id)?.name ?? '';
+
+  return {
+    provider: row.provider_name,
+    model_id: row.model_id,
+    api_name: row.api_name,
+    system_prompt: row.system_prompt,
+    display_name: row.display_name,
+    description: row.description,
+    avatar: row.avatar,
+    enabled: row.enabled,
+    hidden: row.hidden,
+    sort_order: row.sort_order,
+    reasoning_style: row.reasoning_style,
+    reasoning_tiers: row.reasoning_tiers,
+    route_to: target ? { provider: target.provider_name, model_id: target.model_id } : null,
+    supports_reasoning: row.supports_reasoning,
+    supports_images: row.supports_images,
+    supports_vision: row.supports_vision,
+    supports_streaming: row.supports_streaming,
+    supports_system_prompt: row.supports_system_prompt,
+    supports_tools: row.supports_tools,
+    context_window: row.context_window,
+    max_output_tokens: row.max_output_tokens,
+    request_weight: row.request_weight,
+    input_token_weight: row.input_token_weight,
+    output_token_weight: row.output_token_weight,
+    reasoning_token_weight: row.reasoning_token_weight,
+    groups: (row.group_grants ?? [])
+      .map((grant) => ({ group: groupName(grant.group_id), access: grant.access }))
+      .filter((grant) => grant.group),
+  };
+}
+
+/** What an import did, and every entry it would not take. */
+function report(view: AdminView, headline: string, skipped: string[]): void {
+  openPanel({
+    host: view.host,
+    title: headline,
+    footer: false,
+    build: (body) => {
+      if (!skipped.length) {
+        body.appendChild(el('p', 'oa-field-hint', t('importModelsClean')));
+        return;
+      }
+      body.appendChild(el('p', 'oa-field-hint', t('importModelsSkipped', { count: skipped.length })));
+      const list = el('div', 'oa-code-list');
+      for (const line of skipped) list.appendChild(el('code', 'oa-code-line', line));
+      body.appendChild(list);
+    },
+  });
+}
+
+/** A light and a number. Nothing at all when there is no evidence either way. */
+function uptimeCell(entry: ModelHealth | undefined): Node {
+  const status = entry?.status;
+  if (!status || status.samples === 0) {
+    return badges(badge(t('healthUnknown'), 'muted'));
+  }
+  // Down is danger; up but not clean is a warning, because a model at 96%
+  // is failing one turn in twenty and that is worth a colour.
+  const tone = status.state !== 'up' ? 'danger' : status.uptime >= 0.99 ? 'default' : 'warning';
+  const share = `${(status.uptime * 100).toFixed(status.uptime >= 0.995 ? 0 : 1)}%`;
+  const wrap = badges(badge(share, tone));
+  // The reason, without opening anything: an operator scanning the column for
+  // what is broken should not have to click to learn it is the API key.
+  if (status.last_code) wrap.title = `${status.last_code}: ${status.last_message || ''}`.trim();
+  return wrap;
+}
+
+/** Why a model is down, in the panel where somebody is about to act on it. */
+function healthSection(entry: ModelHealth | undefined): HTMLElement | null {
+  const status = entry?.status;
+  if (!status) return null;
+
+  const wrap = el('div', 'oa-form-section');
+  wrap.appendChild(el('h3', 'oa-drawer-subhead', t('secHealth')));
+
+  if (status.samples === 0) {
+    wrap.appendChild(el('p', 'oa-field-hint', t('healthNoEvidence')));
+    return wrap;
+  }
+
+  wrap.appendChild(el('p', 'oa-field-hint', t('healthSummary', {
+    uptime: (status.uptime * 100).toFixed(1),
+    users: status.user_samples,
+    system: status.system_samples,
+  })));
+  if (entry?.auto_disabled) {
+    wrap.appendChild(el('p', 'oa-field-hint', t('healthAutoDisabled')));
+  }
+  if (!status.errors.length) return wrap;
+
+  const list = el('div', 'oa-code-list');
+  for (const failure of status.errors) {
+    list.appendChild(el('code', 'oa-code-line',
+      `${failure.count}x  ${failure.code}${failure.message ? '  ' + failure.message : ''}`));
+  }
+  wrap.appendChild(list);
   return wrap;
 }

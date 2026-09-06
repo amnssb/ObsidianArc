@@ -22,6 +22,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/group"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/health"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/httpx"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/id"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/model"
@@ -49,6 +50,11 @@ type Handlers struct {
 	keys          *apikey.Store
 	requests      *reqlog.Store
 	cards         *card.Store
+	health        *health.Store
+
+	// Not injected: it is two fields of state that only the resources page
+	// has any use for, and it is meaningless before the first request.
+	cpu cpuSampler
 }
 
 func NewHandlers(
@@ -67,6 +73,7 @@ func NewHandlers(
 	keys *apikey.Store,
 	requests *reqlog.Store,
 	cards *card.Store,
+	healthStore *health.Store,
 ) *Handlers {
 	return &Handlers{
 		db:            db,
@@ -84,6 +91,7 @@ func NewHandlers(
 		keys:          keys,
 		requests:      requests,
 		cards:         cards,
+		health:        healthStore,
 	}
 }
 
@@ -96,6 +104,8 @@ func (h *Handlers) Routes(mux *http.ServeMux) {
 	}
 
 	mux.Handle("GET /api/admin/dashboard", protected(h.dashboard))
+	mux.Handle("GET /api/admin/resources", protected(h.resources))
+	mux.Handle("GET /api/admin/health", protected(h.modelHealth))
 
 	mux.Handle("GET /api/admin/users", protected(h.listUsers))
 	mux.Handle("GET /api/admin/users/{id}", protected(h.showUser))
@@ -128,6 +138,7 @@ func (h *Handlers) Routes(mux *http.ServeMux) {
 	mux.Handle("PATCH /api/admin/models/{id}", protected(h.updateModel))
 	mux.Handle("DELETE /api/admin/models/{id}", protected(h.deleteModel))
 	mux.Handle("PUT /api/admin/models/order", protected(h.reorderModels))
+	mux.Handle("POST /api/admin/models/import", protected(h.importModels))
 
 	mux.Handle("GET /api/admin/logs", protected(h.listLogs))
 	mux.Handle("GET /api/admin/logs/facets", protected(h.logFacets))

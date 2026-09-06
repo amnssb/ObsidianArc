@@ -202,7 +202,7 @@
 
 .oa-filters input[type='search'],
 .oa-filters input[type='text'],
-.oa-filters select {
+.oa-filter-select {
   padding: 8px 14px;
   border: none;
   border-radius: 999px;
@@ -213,7 +213,7 @@
   transition: background-color 0.15s ease;
 }
 
-.oa-filters select {
+.oa-filter-select {
   appearance: none;
   padding-right: 30px;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
@@ -224,12 +224,12 @@
 }
 
 .oa-filters input:hover,
-.oa-filters select:hover {
+.oa-filter-select:hover {
   background-color: var(--ai-field-bg-hover);
 }
 
 .oa-filters input:focus,
-.oa-filters select:focus {
+.oa-filter-select:focus-visible {
   outline: none;
   background-color: var(--ai-field-bg-hover);
   box-shadow: 0 0 0 3px var(--ai-focus-shadow);
@@ -1363,7 +1363,7 @@
   align-items: center;
 }
 
-.oa-settings-panel select,
+.oa-settings-panel .oa-select,
 .oa-settings-panel input[type='text'],
 .oa-settings-panel input[type='email'],
 .oa-settings-panel input[type='password'],
@@ -1381,7 +1381,7 @@
   transition: background-color 0.15s ease;
 }
 
-.oa-settings-panel select {
+.oa-settings-panel .oa-select {
   appearance: none;
   padding-right: 30px;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
@@ -1392,13 +1392,13 @@
 }
 
 .oa-settings-panel input:hover,
-.oa-settings-panel select:hover,
+.oa-settings-panel .oa-select:hover,
 .oa-settings-panel textarea:hover {
   background-color: var(--ai-field-bg-hover);
 }
 
 .oa-settings-panel input:focus,
-.oa-settings-panel select:focus,
+.oa-settings-panel .oa-select:focus-visible,
 .oa-settings-panel textarea:focus {
   outline: none;
   background-color: var(--ai-field-bg-hover);
@@ -2043,57 +2043,79 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-/* --- the select's own popup --------------------------------------------- */
+/* The count first and large, because it is the one number an operator came
+   to read; the breakdown under it in the ordinary hint voice. */
+.oa-card-count {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
 
-/* A browser draws the option list, not this stylesheet: it cannot be given a
-   radius, a fill, or the gap under the control that every other menu here
-   has. Chromium hands it back through base-select, so where that exists the
-   picker becomes an ordinary surface and looks like the rest of the
-   interface.
+.oa-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
 
-   Behind @supports rather than replaced with a custom control in
-   JavaScript. A hand-built dropdown is a keyboard map, a focus trap and a
-   positioning problem — in every browser — to fix the appearance in one. */
-@supports (appearance: base-select) {
-  select,
-  ::picker(select) {
-    appearance: base-select;
-  }
+.oa-card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 11px;
+  background: var(--ai-surface-container-low);
+  font-size: 12px;
+}
 
-  ::picker(select) {
-    /* The gap the native popup has no way to leave. */
-    margin-top: 6px;
-    padding: 6px;
-    border: none;
-    border-radius: 14px;
-    background: var(--ai-surface-card);
-    box-shadow: var(--ai-shadow-md);
-  }
+.oa-card-expiry {
+  color: var(--ai-text-secondary);
+}
 
-  select option {
-    padding: 8px 10px;
-    border-radius: 9px;
-    background: transparent;
-    color: var(--ai-text);
-    font-size: 12.5px;
-  }
+/* The challenge widget's own iframe carries its size and its look; all this
+   owes it is somewhere to sit that is not flush against the button below. */
+.oa-challenge {
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+}
 
-  select option:hover {
-    background: var(--ai-state-hover);
-  }
+.oa-challenge:not(:empty) {
+  margin: 2px 0 4px;
+}
 
-  select option:checked {
-    background: var(--ai-primary);
-    color: var(--ai-primary-text);
-  }
+/* The facts about a record that are read, not edited: a label on the left and
+   the value on the right, so a column of them scans without the eye tracking
+   two different left edges. */
+.oa-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -4px 0 4px;
+}
 
-  /* Both marks the picker would add of its own: the tick in front of the
-     selected row, which shifts every other row sideways, and a second arrow
-     on the control, which already draws one. */
-  select option::checkmark,
-  select::picker-icon {
-    display: none;
-  }
+.oa-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.oa-fact-label {
+  color: var(--ai-text-secondary);
+  flex: none;
+}
+
+.oa-fact-value {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+/* An identifier is copied by eye or by selection, and both go wrong in a
+   proportional face. */
+.oa-fact-value.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  user-select: all;
 }
 
 /* A minted batch, listed once. Monospace and one per line so it can be
