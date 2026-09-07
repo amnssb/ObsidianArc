@@ -28,6 +28,7 @@ export const zh: Record<StringKey, string> = {
   add: '添加',
   cancel: '取消',
   close: '关闭',
+  viewImage: '查看大图',
   back: '返回',
   remove: '移除',
   deleteLabel: '删除',

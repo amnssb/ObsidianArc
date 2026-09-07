@@ -24,6 +24,12 @@ import {
   loadAlbum, removeAlbumImage, removeSelectedAlbum, selectAllAlbum,
   toggleAlbumImage,
 } from './useAlbum';
+import { openLightbox } from './useImageLightbox';
+
+/** The thumbnail is the zoom affordance; the download and delete stay buttons. */
+function enlarge(id: string, prompt: string): void {
+  openLightbox(imageURL(id), prompt);
+}
 
 watch(albumOpen, (open) => {
   if (open) void loadAlbum();
@@ -91,7 +97,14 @@ function downloadSelected(): void {
         <p v-if="albumLoading" class="ai-images-empty">{{ t('loading') }}</p>
         <div v-else-if="albumImages.length" class="ai-images-grid">
           <figure v-for="image in albumImages" :key="image.id" class="ai-images-tile">
-            <img :src="imageURL(image.id)" :alt="image.prompt" loading="lazy" decoding="async">
+            <img
+              :src="imageURL(image.id)"
+              :alt="image.prompt"
+              loading="lazy"
+              decoding="async"
+              :title="t('viewImage')"
+              @click="enlarge(image.id, image.prompt)"
+            >
             <input
               type="checkbox"
               class="ai-images-tile-check"

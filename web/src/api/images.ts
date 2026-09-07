@@ -29,13 +29,26 @@ export interface GenerateInput {
   steps?: number;
   /**
    * Uploads (via the attachment endpoint) sent along as reference material.
-   * The server consumes them on success; on failure they stay in the
-   * composer, so a corrected description can be sent without re-uploading.
+   * The server links them to the recorded prompt on success; on failure they
+   * stay in the composer, so a corrected description can be sent without
+   * re-uploading.
    */
   attachment_ids?: string[];
+  /**
+   * The conversation the generation belongs to, so the prompt and the
+   * pictures join its history and survive switching conversations. Absent
+   * means the server starts one and returns its id.
+   */
+  conversation_id?: string;
 }
 
-export function generateImages(input: GenerateInput): Promise<{ images: GeneratedImage[] }> {
+/** What one press produced: the pictures, and the conversation they joined. */
+export interface GenerateResult {
+  conversation_id: string;
+  images: GeneratedImage[];
+}
+
+export function generateImages(input: GenerateInput): Promise<GenerateResult> {
   return api.post('/api/images', input);
 }
 

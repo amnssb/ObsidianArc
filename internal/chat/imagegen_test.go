@@ -12,11 +12,11 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/model"
 )
 
-// The studio's reference pictures ride the same attachment store as chat
-// uploads, but a generation is not a message: nothing may link them to a
-// transcript, and a successful generation is what consumes them.
+// The studio reference pictures ride the same attachment store as chat
+// uploads, and a generation is a turn: without a conversation named, one is
+// started, and the prompt, the reference and the pictures all land in it.
 
-func TestReferenceImagesRideTheChatPathAndAreConsumed(t *testing.T) {
+func TestABoundGenerationRecordsItsTurn(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 
@@ -52,7 +52,7 @@ func TestReferenceImagesRideTheChatPathAndAreConsumed(t *testing.T) {
 		`{"choices":[{"message":{"content":"![a](data:image/png;base64,` + picture + `)"}}]}`,
 	)
 
-	images, err := f.service.GenerateImages(ctx, f.account, GenerateRequest{
+	result, err := f.service.GenerateImages(ctx, f.account, GenerateRequest{
 		ModelID:       drawer.ID,
 		Prompt:        "make this a watercolour",
 		AttachmentIDs: []string{uploaded.ID},
@@ -60,8 +60,11 @@ func TestReferenceImagesRideTheChatPathAndAreConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if len(images) != 1 {
-		t.Fatalf("stored %d pictures, want 1", len(images))
+	if len(result.Images) != 1 {
+		t.Fatalf("stored %d pictures, want 1", len(result.Images))
+	}
+	if result.ConversationID == "" {
+		t.Fatal("a generation without a conversation was not given one")
 	}
 
 	// The reference reached the provider as an image part, not only as words.
@@ -84,18 +87,118 @@ func TestReferenceImagesRideTheChatPathAndAreConsumed(t *testing.T) {
 		t.Fatal("the reference image never reached the provider")
 	}
 
-	// A successful generation is what consumes the upload...
-	if _, _, err := f.conversations.Blob(ctx, f.account.ID, uploaded.ID); !errors.Is(err, conversation.ErrAttachmentNotFound) {
-		t.Errorf("the spent reference is still readable: %v", err)
+	// The turn is replayable: the prompt is the reader message carrying
+	// the reference, and the pictures are the answer attachments.
+	messages, err := f.conversations.Messages(ctx, nil, f.account.ID, result.ConversationID)
+	if err != nil {
+		t.Fatalf("the recorded conversation is gone: %v", err)
 	}
-	// ...and nothing was written into any conversation: a generation is not
-	// a turn, even when it borrows the turn's front door.
-	list, err := f.conversations.List(ctx, f.account.ID, 0)
+	if len(messages) != 2 {
+		t.Fatalf("the turn recorded %d messages, want 2", len(messages))
+	}
+	question, answer := messages[0], messages[1]
+	if question.Role != conversation.RoleUser || question.Content != "make this a watercolour" {
+		t.Errorf("the prompt was not recorded as the question: %q / %q", question.Role, question.Content)
+	}
+	if len(question.Attachments) != 1 || question.Attachments[0].ID != uploaded.ID {
+		t.Errorf("the reference did not ride with the prompt: %+v", question.Attachments)
+	}
+	if answer.Role != conversation.RoleAssistant {
+		t.Errorf("the answer role = %q", answer.Role)
+	}
+	if len(answer.Attachments) != 1 {
+		t.Fatalf("the answer carries %d pictures, want 1", len(answer.Attachments))
+	}
+	if answer.Attachments[0].ID == result.Images[0].ID {
+		t.Error("the transcript attachment reuses the gallery id instead of its own row")
+	}
+	if answer.ModelName != "Drawer" {
+		t.Errorf("the answer does not name the model that drew it: %q", answer.ModelName)
+	}
+
+	// The gallery keeps its own copy for the album; deleting one surface
+	// picture must not reach into the other.
+	if _, _, err := f.conversations.Blob(ctx, f.account.ID, answer.Attachments[0].ID); err != nil {
+		t.Errorf("the recorded picture is not readable from the transcript: %v", err)
+	}
+	if _, _, err := f.service.gallery.Open(ctx, f.account.ID, result.Images[0].ID); err != nil {
+		t.Errorf("the album copy vanished: %v", err)
+	}
+}
+
+// A generation asked into an existing conversation appends to it rather than
+// starting another one, so drawing twice in a row replays both turns in
+// order — and a conversation owned by somebody else is not a home.
+func TestABoundGenerationJoinsItsConversation(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	drawer, err := f.models.Create(ctx, model.CreateInput{
+		ProviderID:  f.model.ProviderID,
+		ModelID:     "drawer",
+		DisplayName: "Drawer",
+		Enabled:     true,
+		Capabilities: model.Capabilities{
+			SupportsStreaming:   true,
+			SupportsImageOutput: true,
+		},
+		Weights: model.Weights{InputToken: 1, OutputToken: 1},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 0 {
-		t.Errorf("the generation created %d conversations, want 0", len(list))
+
+	picture := base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4e, 0x47, 9, 9, 9, 9})
+	answer := "{\"choices\":[{\"message\":{\"content\":\"![a](data:image/png;base64," + picture + ")\"}}]}"
+	f.upstream.plain(answer)
+
+	first, err := f.service.GenerateImages(ctx, f.account, GenerateRequest{
+		ModelID: drawer.ID, Prompt: "a lighthouse in a storm",
+	})
+	if err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+
+	f.upstream.plain(answer)
+	second, err := f.service.GenerateImages(ctx, f.account, GenerateRequest{
+		ModelID:        drawer.ID,
+		Prompt:         "the same, at dusk",
+		ConversationID: first.ConversationID,
+	})
+	if err != nil {
+		t.Fatalf("second generate: %v", err)
+	}
+	if second.ConversationID != first.ConversationID {
+		t.Fatalf("the second press started conversation %q, want %q", second.ConversationID, first.ConversationID)
+	}
+
+	messages, err := f.conversations.Messages(ctx, nil, f.account.ID, first.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("two presses recorded %d messages, want 4", len(messages))
+	}
+	if messages[2].Content != "the same, at dusk" {
+		t.Errorf("the second prompt landed out of order: %q", messages[2].Content)
+	}
+
+	// A conversation owned by somebody else is not a home: a stale id from
+	// a deleted or foreign conversation is a not-found, never another
+	// account history.
+	foreign := f.other
+	f.upstream.plain(answer)
+	_, err = f.service.GenerateImages(ctx, foreign, GenerateRequest{
+		ModelID:        drawer.ID,
+		Prompt:         "not mine",
+		ConversationID: first.ConversationID,
+	})
+	var httpErr *httpx.Error
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("a foreign conversation accepted a generation: %v", err)
+	}
+	if still, _ := f.conversations.Messages(ctx, nil, f.account.ID, first.ConversationID); len(still) != 4 {
+		t.Errorf("the refused press changed the conversation anyway: %d messages", len(still))
 	}
 }
 
@@ -125,7 +228,7 @@ func TestStepsReachTheImagesEndpointClamped(t *testing.T) {
 	picture := base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
 	f.upstream.plain(`{"data":[{"b64_json":"` + picture + `"}]}`)
 
-	images, err := f.service.GenerateImages(ctx, f.account, GenerateRequest{
+	result, err := f.service.GenerateImages(ctx, f.account, GenerateRequest{
 		ModelID: endpointModel.ID,
 		Prompt:  "a lighthouse",
 		Steps:   30,
@@ -133,8 +236,8 @@ func TestStepsReachTheImagesEndpointClamped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	if len(images) != 1 {
-		t.Fatalf("stored %d pictures, want 1", len(images))
+	if len(result.Images) != 1 {
+		t.Fatalf("stored %d pictures, want 1", len(result.Images))
 	}
 	sent := f.upstream.lastRequest()
 	if sent["steps"] != float64(30) {

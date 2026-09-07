@@ -1,10 +1,13 @@
 // The 生图 studio's state: what the composer holds and what the stream shows.
 //
 // A module-level store, the way useChat and useModels are. A generation is a
-// card in the stream, not a row in a grid: each press appends one card that
-// starts working and finishes done or failed, and the composer's references
-// ride along only when they were actually uploaded — the server consumes them
-// on success, so a corrected description can be sent without re-uploading.
+// turn in the conversation it was asked from — the server records the prompt
+// and the pictures there — so the stream is not the studio's own list but a
+// projection of the open conversation's messages: switching conversations in
+// the rail replays both the words and the pictures, and a fresh conversation
+// empties the stream, exactly like the chat behaves. The one thing the
+// projection cannot show is the press still running, so a working card rides
+// alongside until the authoritative reload replaces it.
 //
 // The presets travel to the server as structured fields (ratio, count), not
 // as text baked into the prompt: the backend knows which wire parameter the
@@ -12,25 +15,13 @@
 
 import { computed, ref } from 'vue';
 import { ApiError } from '@/api/client';
-import { uploadAttachment, type AttachmentRef } from '@/api/chat';
-import { generateImages, type GeneratedImage, type GenerateInput } from '@/api/images';
+import { uploadAttachment, type AttachmentRef, type Message } from '@/api/chat';
+import { generateImages, type GenerateInput } from '@/api/images';
 import { t } from '@/composables/useI18n';
 import type { StringKey } from '@/i18n';
 import { ImageError, prepareImage, type PreparedImage } from './image';
+import { activeID, busy as chatBusy, messages, refreshList, reloadActive } from './useChat';
 import { models } from './useModels';
-
-/** One generation in the stream, in whichever state it currently is. */
-export interface StudioCard {
-  id: string;
-  prompt: string;
-  model_name: string;
-  ratio: string;
-  count: number;
-  state: 'working' | 'done' | 'failed';
-  images: GeneratedImage[];
-  error?: string;
-  created_at: number;
-}
 
 /** The ratios the studio offers. Labels are the format itself, not prose. */
 export const RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16'] as const;
@@ -62,9 +53,11 @@ export const studioRatio = ref<string>(RATIOS[0]);
 export const studioCount = ref<number>(COUNTS[0]);
 export const studioSteps = ref(0);
 export const references = ref<Array<{ attachment: AttachmentRef; preview: string }>>([]);
-export const cards = ref<StudioCard[]>([]);
 export const studioBusy = ref(false);
 export const studioFlash = ref<{ text: string; error: boolean } | null>(null);
+
+/** The press still running, shown as a working card until the reload lands. */
+export const pendingCard = ref<{ prompt: string; model_name: string; ratio: string; count: number } | null>(null);
 
 /** Either way to draw qualifies: a chat answer that carries pictures, or a model the provider exposes on its native images endpoint. */
 export const imageModels = computed(() =>
@@ -106,10 +99,10 @@ export function composeImagePrompt(prompt: string, styleNotes?: string): string 
 }
 
 /**
- * The wire shape of one generate press. Steps and references ride along only
- * when they were actually set: an absent field is the endpoint's own default,
- * while a zero would arrive as an argument the strict official images API
- * answers with a 400.
+ * The wire shape of one generate press. Steps, references and the binding
+ * conversation ride along only when they were actually set: an absent field
+ * is the endpoint's own default, while a zero would arrive as an argument
+ * the strict official images API answers with a 400.
  */
 export function generatePayload(input: {
   model_id: string;
@@ -118,6 +111,7 @@ export function generatePayload(input: {
   count: number;
   steps: number;
   attachment_ids?: string[];
+  conversation_id?: string;
 }): GenerateInput {
   return {
     model_id: input.model_id,
@@ -126,8 +120,60 @@ export function generatePayload(input: {
     count: input.count,
     ...(input.steps > 0 ? { steps: input.steps } : {}),
     ...(input.attachment_ids?.length ? { attachment_ids: input.attachment_ids } : {}),
+    ...(input.conversation_id ? { conversation_id: input.conversation_id } : {}),
   };
 }
+
+/**
+ * What the stream shows, projected from the conversation's messages. Pure and
+ * exported for tests: a user message is the prompt, an assistant message with
+ * pictures is the card, and anything else — plain answers, mixed in when the
+ * same conversation carried chat turns too — stays readable as text. The
+ * prompt of a card is whatever the reader said just before it, which is also
+ * what makes an old generation's card survive a reload with its prompt on it.
+ */
+export type StudioItem =
+  | { kind: 'text'; id: string; role: 'user' | 'assistant'; content: string; created_at: number }
+  | { kind: 'card'; id: string; prompt: string; model_name: string; images: AttachmentRef[]; working?: boolean; created_at: number };
+
+export function projectStudioItems(list: readonly Message[]): StudioItem[] {
+  const items: StudioItem[] = [];
+  let prompt = '';
+  for (const message of list) {
+    if (message.role === 'user') {
+      prompt = message.content;
+      if (prompt) {
+        items.push({ kind: 'text', id: message.id, role: 'user', content: prompt, created_at: message.created_at });
+      }
+      continue;
+    }
+    const images = (message.attachments ?? []).filter((image) => !image.discarded);
+    if (images.length) {
+      items.push({ kind: 'card', id: message.id, prompt, model_name: message.model_name ?? '', images, created_at: message.created_at });
+      prompt = '';
+    } else if (message.content) {
+      items.push({ kind: 'text', id: message.id, role: 'assistant', content: message.content, created_at: message.created_at });
+    }
+  }
+  return items;
+}
+
+/** The stream: the conversation's turns, plus the working card while a press runs. */
+export const studioItems = computed<StudioItem[]>(() => {
+  const items = projectStudioItems(messages.value);
+  if (pendingCard.value) {
+    items.push({
+      kind: 'card',
+      id: 'pending',
+      prompt: pendingCard.value.prompt,
+      model_name: pendingCard.value.model_name,
+      images: [],
+      working: true,
+      created_at: Date.now(),
+    });
+  }
+  return items;
+});
 
 export async function addReferenceFiles(list: FileList | File[] | null): Promise<void> {
   if (studioBusy.value || !referencesSupported()) return;
@@ -175,29 +221,13 @@ export function clearReferences(): void {
   references.value = [];
 }
 
-let cardSeq = 0;
-
 export async function generateInStudio(): Promise<void> {
-  if (studioBusy.value || !studioModelID.value) return;
+  if (studioBusy.value || chatBusy.value || !studioModelID.value) return;
   const prompt = composeImagePrompt(studioDraft.value, studioNotes.value);
   if (!prompt) return;
 
   const model = studioModel.value;
-  const id = 'studio-' + Date.now().toString(36) + '-' + (++cardSeq);
-  cards.value.push({
-    id,
-    prompt,
-    model_name: model?.display_name ?? '',
-    ratio: studioRatio.value,
-    count: studioCount.value,
-    state: 'working',
-    images: [],
-    created_at: Date.now(),
-  });
-  // Read the card back through the array so mutations land on the reactive
-  // proxy — the local object above is plain, and writing to it would draw nothing.
-  const card = cards.value.find((entry) => entry.id === id)!;
-
+  pendingCard.value = { prompt, model_name: model?.display_name ?? '', ratio: studioRatio.value, count: studioCount.value };
   studioBusy.value = true;
   studioFlash.value = null;
   try {
@@ -207,20 +237,35 @@ export async function generateInStudio(): Promise<void> {
       ratio: studioRatio.value,
       count: studioCount.value,
       steps: studioSteps.value,
+      // Bind the press to the conversation it was asked from. An empty id
+      // means the server starts one and answers with it, which is how a
+      // first press gets a home in the rail.
+      ...(activeID.value ? { conversation_id: activeID.value } : {}),
       ...(references.value.length ? { attachment_ids: references.value.map((entry) => entry.attachment.id) } : {}),
     }));
-    card.images = result.images;
-    card.state = 'done';
     studioDraft.value = '';
-    // The server consumed the references on success; the failure path keeps
-    // them so a corrected description can be sent without re-uploading.
+    // The server linked the references to the recorded prompt on success; a
+    // failure keeps them so a corrected description can be sent without
+    // re-uploading.
     clearReferences();
     studioFlash.value = { text: t('studioNote'), error: false };
+    // The server owns the transcript: adopt the conversation it recorded the
+    // turn in — a new one on a first press — and read the authoritative
+    // messages back, exactly the way a chat turn ends.
+    if (result.conversation_id && result.conversation_id !== activeID.value) {
+      activeID.value = result.conversation_id;
+    }
+    await reloadActive();
+    void refreshList();
   } catch (error) {
-    card.error = error instanceof ApiError ? error.message : String(error);
-    card.state = 'failed';
-    studioFlash.value = { text: t('toolboxFailed', { message: card.error }), error: true };
+    const message = error instanceof ApiError ? error.message : String(error);
+    studioFlash.value = { text: t('toolboxFailed', { message }), error: true };
   } finally {
+    pendingCard.value = null;
     studioBusy.value = false;
   }
 }
+
+
+
+

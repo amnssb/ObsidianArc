@@ -474,6 +474,10 @@ type imageGenerateRequest struct {
 	Count         int      `json:"count"`
 	AttachmentIDs []string `json:"attachment_ids"`
 	Steps         int      `json:"steps"`
+	// The conversation the generation belongs to, so the prompt and the
+	// pictures join its history and survive a switch of conversations.
+	// Empty keeps the pictures gallery-only.
+	ConversationID string `json:"conversation_id"`
 }
 
 // generateImage runs one generation and answers with what was stored. Unlike
@@ -497,24 +501,28 @@ func (h *Handlers) generateImage(w http.ResponseWriter, r *http.Request) error {
 	if len(body.AttachmentIDs) > MaxReferenceImages {
 		return httpx.BadRequest("At most %d reference images per generation.", MaxReferenceImages)
 	}
+	if body.ConversationID != "" && !id.Valid(body.ConversationID) {
+		return httpx.BadRequest("Malformed conversation id.")
+	}
 
-	images, err := h.service.GenerateImages(r.Context(), account, GenerateRequest{
-		ModelID:       body.ModelID,
-		Prompt:        body.Prompt,
-		Ratio:         body.Ratio,
-		Count:         body.Count,
-		AttachmentIDs: body.AttachmentIDs,
-		Steps:         body.Steps,
+	result, err := h.service.GenerateImages(r.Context(), account, GenerateRequest{
+		ModelID:        body.ModelID,
+		Prompt:         body.Prompt,
+		Ratio:          body.Ratio,
+		Count:          body.Count,
+		AttachmentIDs:  body.AttachmentIDs,
+		Steps:          body.Steps,
+		ConversationID: body.ConversationID,
 	})
 	if err != nil {
 		// The spend check's refusals are already person-shaped httpx errors;
 		// everything upstream went through the gateway's own classifier.
 		return err
 	}
-	if images == nil {
-		images = []gallery.Image{}
+	if result.Images == nil {
+		result.Images = []gallery.Image{}
 	}
-	return httpx.WriteJSON(w, http.StatusOK, map[string]any{"images": images})
+	return httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h *Handlers) listImages(w http.ResponseWriter, r *http.Request) error {

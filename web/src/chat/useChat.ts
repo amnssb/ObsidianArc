@@ -383,7 +383,12 @@ export async function refreshList(): Promise<void> {
   }
 }
 
-async function reloadActive(): Promise<void> {
+/**
+ * Reads the open conversation back from the server. Exported for the image
+ * studio, whose presses land in the same conversations and need the same
+ * authoritative reload a chat turn gets.
+ */
+export async function reloadActive(): Promise<void> {
   if (!activeID.value) {
     messages.value = [];
     return;

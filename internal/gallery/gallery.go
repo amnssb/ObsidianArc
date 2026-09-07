@@ -1,9 +1,11 @@
 // Package gallery stores the pictures the image toolbox generates.
 //
-// They are deliberately not attachments and not messages. A generation never
-// joins a conversation — that is the whole point of the toolbox — so it gets
-// rows of its own that the transcript's truncation, editing and retention
-// rules cannot reach, owned directly by the account that paid for them.
+// A generation also joins a conversation as a turn — the prompt and the
+// pictures are replayed from the transcript — but that record carries its
+// own attachment copies, so these rows stay out of the transcript's
+// truncation, editing and retention rules: the album reads from here,
+// deleting here never reaches into a conversation, and the account that
+// paid for the pictures owns the rows directly.
 package gallery
 
 import (

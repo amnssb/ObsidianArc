@@ -1,19 +1,20 @@
 <script setup lang="ts">
 // The 生图 surface, drawn in place of the conversation.
 //
-// A generation is not a conversation, so it does not get a transcript — but it
-// does not get a page of its own either: this component is swapped into the
-// chat's main column while the rail beside it stays. The stream behaves like
-// the transcript does — every press appends a card at the bottom and the view
-// follows — and the composer is one floating card docked under it, the way
-// the chat's composer floats under the answers.
+// A generation joins the conversation it was asked from, so the stream is the
+// conversation's history projected: the prompt you sent, the pictures that
+// came back, and any plain answers the same conversation carries — which is
+// what makes a switch in the rail replay everything. The component itself is
+// swapped into the chat's main column while the rail beside it stays, and the
+// composer is one floating card docked under the stream, the way the chat's
+// composer floats under the answers.
 //
 // A light tag on the composer names the mode and is also the way out: one
 // click returns to the conversation, no banner above the stream required.
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { imageURL } from '@/api/images';
+import { attachmentURL } from '@/api/chat';
 import OaIconButton from '@/components/OaIconButton.vue';
 import OaMenu from '@/components/OaMenu.vue';
 import { t } from '@/composables/useI18n';
@@ -21,11 +22,12 @@ import { relativeTime } from '@/lib/format';
 import { IconClose, IconImage, IconSliders, IconSpark } from '@/icons';
 import {
   PROMPT_MAX_CHARS, RATIOS, STEPS, COUNTS,
-  addReferenceFiles, cards, ensureStudioModel, generateInStudio, imageModels,
+  addReferenceFiles, ensureStudioModel, generateInStudio, imageModels,
   references, referencesSupported, removeReference, studioBusy, studioCount,
-  studioDraft, studioFlash, studioModelID, studioNotes,
+  studioDraft, studioFlash, studioItems, studioModelID, studioNotes,
   studioRatio, studioSteps,
 } from './useImageStudio';
+import { openLightbox } from './useImageLightbox';
 import { loadModels, models } from './useModels';
 
 const router = useRouter();
@@ -74,9 +76,10 @@ onBeforeUnmount(resize);
  * The stream copies the transcript's manners: follow the newest card, but
  * only while the reader is already at the bottom — yanking the view back
  * while somebody is looking at an earlier picture is worse than letting the
- * new one land off screen.
+ * new one land off screen. The length moves when a turn is recorded or the
+ * working card lands; the busy flag catches the reload that replaces it.
  */
-watch(() => cards.value.length + ' ' + (cards.value[cards.value.length - 1]?.state ?? ''), () => {
+watch([() => studioItems.value.length, studioBusy], () => {
   void nextTick(() => {
     const node = stream.value;
     if (!node) return;
@@ -117,49 +120,59 @@ function pickReferenceFiles(): void {
 function exit(): void {
   void router.push('/');
 }
+
+/**
+ * A picture opens at full size over the app, never in a new tab: leaving the
+ * interface to look at what the interface produced is the wrong direction.
+ */
+function enlarge(src: string, alt: string): void {
+  openLightbox(src, alt);
+}
 </script>
 
 <template>
   <div class="ai-chat-main ai-studio">
     <div ref="stream" class="ai-studio-stream">
-      <div v-if="!cards.length" class="ai-chat-empty ai-studio-empty">
+      <div v-if="!studioItems.length" class="ai-chat-empty ai-studio-empty">
         <h3 class="ai-chat-empty-title">{{ t('imagesTitle') }}</h3>
         <p class="ai-chat-empty-body">{{ t('toolboxEmpty') }}</p>
         <p class="ai-chat-empty-body">{{ t('studioNote') }}</p>
       </div>
 
-      <article
-        v-for="card in cards"
-        :key="card.id"
-        class="ai-studio-msg"
-        :class="{ working: card.state === 'working' }"
-      >
-        <p class="ai-studio-msg-prompt">{{ card.prompt }}</p>
-        <div v-if="card.state === 'working'" class="ai-studio-msg-status">
-          <span class="ai-studio-spinner" aria-hidden="true" />
-          <span>{{ t('toolboxWorking') }}</span>
-        </div>
-        <p v-else-if="card.state === 'failed'" class="ai-studio-msg-error">{{ card.error }}</p>
-        <div
-          v-else
-          class="ai-studio-msg-grid"
-          :data-count="card.images.length"
-        >
-          <a
-            v-for="image in card.images"
-            :key="image.id"
-            class="ai-studio-msg-img"
-            :href="imageURL(image.id)"
-            target="_blank"
-            rel="noopener"
+      <template v-for="item in studioItems" :key="item.id">
+        <!-- A turn that carried only words: readable where it happened. -->
+        <article v-if="item.kind === 'text'" class="ai-studio-msg ai-studio-msg-text">
+          <p :class="item.role === 'user' ? 'ai-studio-msg-prompt' : 'ai-studio-msg-answer'">{{ item.content }}</p>
+        </article>
+
+        <article v-else class="ai-studio-msg" :class="{ working: item.working }">
+          <p class="ai-studio-msg-prompt">{{ item.prompt }}</p>
+          <div v-if="item.working" class="ai-studio-msg-status">
+            <span class="ai-studio-spinner" aria-hidden="true" />
+            <span>{{ t('toolboxWorking') }}</span>
+          </div>
+          <div
+            v-else
+            class="ai-studio-msg-grid"
+            :data-count="item.images.length"
           >
-            <img :src="imageURL(image.id)" :alt="card.prompt" loading="lazy" decoding="async">
-          </a>
-        </div>
-        <p class="ai-studio-msg-meta">
-          {{ card.model_name }} · {{ card.ratio }} · {{ relativeTime(card.created_at) }}
-        </p>
-      </article>
+            <button
+              v-for="image in item.images"
+              :key="image.id"
+              type="button"
+              class="ai-studio-msg-img"
+              :title="t('viewImage')"
+              :aria-label="t('viewImage')"
+              @click="enlarge(attachmentURL(image.id), item.prompt)"
+            >
+              <img :src="attachmentURL(image.id)" :alt="item.prompt" loading="lazy" decoding="async">
+            </button>
+          </div>
+          <p v-if="!item.working" class="ai-studio-msg-meta">
+            {{ item.model_name }} · {{ relativeTime(item.created_at) }}
+          </p>
+        </article>
+      </template>
     </div>
 
     <p

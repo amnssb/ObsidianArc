@@ -151,7 +151,7 @@ Measured on the build in this repository, SQLite, one process:
 
 | | |
 | --- | --- |
-| Binary | 17.4 MB — 13.8 MB built `-tags nosqlite` for a Postgres-only deployment |
+| Binary | 17.5 MB — 13.9 MB built `-tags nosqlite` for a Postgres-only deployment |
 | Cold start to serving | 28 ms |
 | Idle resident memory | ~16 MB |
 | After 200 streamed turns, 20 concurrent | ~54 MB peak, 11 OS threads |

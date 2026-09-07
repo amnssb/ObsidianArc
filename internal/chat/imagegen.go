@@ -1,18 +1,19 @@
 // The image toolbox's dedicated generation path.
 //
-// A generation is not a conversation: nothing is appended to a transcript,
-// nothing is replayed as history, and the pictures land in the gallery
-// rather than beside a message. What it shares with a chat turn is the
-// front door — the same model permission, the same spend check, the same
-// usage ledger — because "the account spent something on a provider" is one
-// fact, whoever asked.
+// A generation is a turn in the conversation it was asked from: the prompt
+// becomes the reader's message, the pictures become the answer, and switching
+// conversations replays both. It is also not a transcript turn in the
+// streaming sense — nothing is sent to a provider as history afterwards, and
+// the pictures still land in the gallery, which the album reads from further
+// away. What it shares with a chat turn is the front door — the same model
+// permission, the same spend check, the same usage ledger — because "the
+// account spent something on a provider" is one fact, whoever asked.
 
 package chat
 
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/adapter"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/httpx"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/id"
@@ -57,26 +59,40 @@ type GenerateRequest struct {
 	Ratio string
 	Count int
 	// Uploads (via the attachment endpoint) sent along as reference
-	// material for the picture. Consumed by the generation, not stored in
-	// any conversation.
+	// material for the picture. They are linked to the recorded prompt
+	// rather than consumed, so the turn remembers what it was looking at.
 	AttachmentIDs []string
 	// Diffusion sampling steps, when the reader set one. Zero leaves the
 	// quality to the endpoint's own default, which is also what keeps the
 	// OpenAI images API — which has no such field — working unchanged.
 	Steps int
+	// The conversation the generation belongs to. Empty starts a new one,
+	// so a first press from the studio has a home to return to and every
+	// generation is replayable from the rail — a generation is never an
+	// orphan outside any conversation.
+	ConversationID string
 }
 
-// GenerateImages produces one batch of pictures and stores them in the
-// account's gallery. The reserve/record discipline mirrors Run: the spend
-// check before the provider call, the ledger row after it, whatever the
-// outcome.
-func (s *Service) GenerateImages(ctx context.Context, actor user.User, req GenerateRequest) ([]gallery.Image, error) {
+// GenerationResult is what one press produced: the pictures, and the
+// conversation they were recorded in — a new one when the request named
+// none, so the client can adopt it as the active conversation.
+type GenerationResult struct {
+	ConversationID string          `json:"conversation_id"`
+	Images         []gallery.Image `json:"images"`
+}
+
+// GenerateImages produces one batch of pictures, stores them in the account's
+// gallery, and records the prompt and the pictures as one turn of the
+// conversation they belong to — a new conversation when none was named. The
+// reserve/record discipline mirrors Run: the spend check before the provider
+// call, the ledger row after it, whatever the outcome.
+func (s *Service) GenerateImages(ctx context.Context, actor user.User, req GenerateRequest) (GenerationResult, error) {
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
-		return nil, httpx.BadRequest("Describe the picture you want first.")
+		return GenerationResult{}, httpx.BadRequest("Describe the picture you want first.")
 	}
 	if utf8.RuneCountInString(prompt) > MaxPromptRunes {
-		return nil, httpx.BadRequest("The description must be %d characters or fewer.", MaxPromptRunes)
+		return GenerationResult{}, httpx.BadRequest("The description must be %d characters or fewer.", MaxPromptRunes)
 	}
 	count := req.Count
 	if count < 1 {
@@ -94,46 +110,112 @@ func (s *Service) GenerateImages(ctx context.Context, actor user.User, req Gener
 	}
 
 	// Prepare is the chat turn's own front door, and it takes a TurnRequest —
-	// the conversation fields stay empty, which is exactly what a generation
-	// is: a turn with no conversation attached.
+	// the conversation fields stay empty, because a generation never runs as
+	// a streaming turn; the record below is how it joins a conversation.
 	turn := TurnRequest{User: actor, ModelID: req.ModelID, Content: prompt}
 	resolved, release, err := s.Prepare(ctx, &turn)
 	if err != nil {
-		return nil, translatePrepareError(err)
+		return GenerationResult{}, translatePrepareError(err)
 	}
 	defer release()
 
 	if !resolved.Model.SupportsImageAPI && !resolved.Model.SupportsImageOutput {
-		return nil, httpx.ForbiddenCode("not_an_image_model", "That model cannot generate images.")
+		return GenerationResult{}, httpx.ForbiddenCode("not_an_image_model", "That model cannot generate images.")
 	}
 
 	refs, refIDs, err := s.loadReferences(ctx, actor.ID, req.AttachmentIDs)
 	if err != nil {
-		return nil, err
+		return GenerationResult{}, err
 	}
 
 	startedAt := time.Now()
 	images, err := s.draw(ctx, actor.ID, resolved, prompt, req.Ratio, count, steps, refs)
 	if err != nil {
 		s.recordGeneration(ctx, turn, resolved, startedAt, StatusError, err)
-		return nil, err
+		return GenerationResult{}, err
 	}
 	s.recordGeneration(ctx, turn, resolved, startedAt, StatusOK, nil)
 
-	// The references were spent on this generation. Cleared only on
-	// success, so a failed one leaves them in the composer and the reader
-	// can adjust the description and send again without re-uploading.
-	// Detached, because the request context dies with the browser and the
-	// bytes are already on their way to the provider.
-	if len(refIDs) > 0 {
-		dropCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-		defer cancel()
-		if _, err := s.conversations.DeleteUnsent(dropCtx, actor.ID, refIDs); err != nil {
-			slog.ErrorContext(dropCtx, "could not remove used reference images",
-				"error", err, "user", actor.ID)
-		}
+	// The turn joins the conversation it belongs to. A failed record fails
+	// the request, even though the pictures were drawn and the gallery has
+	// them: a success the transcript cannot replay is the failure the
+	// reader cannot see — the card would vanish on the next reload.
+	conversationID, err := s.recordGenerationTurn(ctx, actor, req.ConversationID, resolved, prompt, images, refIDs, startedAt)
+	if err != nil {
+		return GenerationResult{}, err
 	}
-	return images, nil
+	return GenerationResult{ConversationID: conversationID, Images: images}, nil
+}
+
+// recordGenerationTurn writes one finished generation into a conversation:
+// the prompt as the reader's message, the pictures as the answer. Each
+// picture is stored through the same attachment store an upload takes, so
+// the transcript renders it like every other picture it owns; the gallery
+// keeps its own copy, because the album reads from there and deleting from
+// one surface should not reach into the other.
+//
+// The generation keeps its reference pictures too — they are linked to the
+// recorded prompt rather than consumed, so the turn remembers what it was
+// looking at.
+func (s *Service) recordGenerationTurn(ctx context.Context, actor user.User, conversationID string, resolved model.Resolved, prompt string, images []gallery.Image, refIDs []string, startedAt time.Time) (string, error) {
+	attachmentIDs := make([]string, 0, len(images))
+	for _, image := range images {
+		_, data, err := s.gallery.Open(ctx, actor.ID, image.ID)
+		if err != nil {
+			return "", err
+		}
+		record, err := s.conversations.Upload(ctx, conversation.UploadInput{
+			UserID: actor.ID,
+			Mime:   image.MIME,
+			Data:   data,
+		})
+		if err != nil {
+			return "", err
+		}
+		attachmentIDs = append(attachmentIDs, record.ID)
+	}
+
+	err := s.db.Tx(ctx, func(tx *database.Tx) error {
+		if conversationID == "" {
+			created, err := s.conversations.Create(ctx, tx, actor.ID,
+				conversation.DeriveTitle(prompt), resolved.Model.ID)
+			if err != nil {
+				return err
+			}
+			conversationID = created.ID
+		} else if _, err := s.conversations.Get(ctx, tx, actor.ID, conversationID); err != nil {
+			if errors.Is(err, conversation.ErrNotFound) {
+				return httpx.NotFound("No such conversation.")
+			}
+			return err
+		}
+
+		if _, err := s.conversations.Append(ctx, tx, conversation.AppendInput{
+			ConversationID: conversationID,
+			UserID:         actor.ID,
+			Role:           conversation.RoleUser,
+			Content:        prompt,
+			AttachmentIDs:  refIDs,
+		}); err != nil {
+			return err
+		}
+
+		_, err := s.conversations.Append(ctx, tx, conversation.AppendInput{
+			ConversationID: conversationID,
+			UserID:         actor.ID,
+			Role:           conversation.RoleAssistant,
+			ModelID:        resolved.Model.ID,
+			ModelName:      resolved.Model.DisplayName,
+			ProviderID:     resolved.Provider.ID,
+			AttachmentIDs:  attachmentIDs,
+			Stats:          &conversation.Stats{MS: time.Since(startedAt).Milliseconds()},
+		})
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return conversationID, nil
 }
 
 // loadReferences reads the pictures the reader attached as reference

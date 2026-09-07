@@ -33,6 +33,7 @@ const en = {
   add: 'Add',
   cancel: 'Cancel',
   close: 'Close',
+  viewImage: 'View image',
   back: 'Back',
   remove: 'Remove',
   deleteLabel: 'Delete',

@@ -12,6 +12,7 @@
 import { ref, type HTMLAttributes } from 'vue';
 import AnnounceBell from '@/announce/AnnounceBell.vue';
 import AlbumDrawer from '@/chat/AlbumDrawer.vue';
+import ImageLightbox from '@/chat/ImageLightbox.vue';
 import OaThemeToggle from '@/components/OaThemeToggle.vue';
 import { providePanelHost } from '@/composables/usePanelHost';
 import { t } from '@/composables/useI18n';
@@ -80,6 +81,10 @@ defineExpose({ body });
          <body> itself, so where it sits in this tree is only about who can
          open it. -->
     <AlbumDrawer />
+
+    <!-- The one lightbox every picture in the app opens into — the studio's
+         stream, the album's tiles, the transcript's own attachments. -->
+    <ImageLightbox />
 
     <slot name="banners" />
 

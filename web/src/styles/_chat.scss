@@ -2531,3 +2531,92 @@
     transition: none;
   }
 }
+
+/* --- image lightbox: one full-size view over every surface ----------------------
+   Reached from the studio's stream, the album's tiles and the transcript's
+   attachments alike. A near-black veil instead of the album's thin one,
+   because the lightbox has one job — showing a picture at its largest — and
+   a z-index above the drawer it is often opened from. */
+
+.oa-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.oa-lightbox-overlay.open {
+  opacity: 1;
+}
+
+.ai-lightbox {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  max-width: min(1100px, 94vw);
+}
+
+.ai-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: 82vh;
+  border-radius: 14px;
+  object-fit: contain;
+  background: var(--ai-surface-container-low);
+  box-shadow: var(--ai-shadow-md);
+}
+
+/* The close sits on the veil, off the picture, where a corner button lives. */
+.ai-lightbox-close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  z-index: 1;
+}
+
+/* A long prompt fades instead of pushing the picture around. */
+.ai-lightbox-caption {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The studio's stream also carries turns that were only words. The reader's
+   line keeps the prompt's voice; an answer sits quieter below it. */
+.ai-studio-msg-answer {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ai-text-secondary);
+}
+
+/* The thumbnail is now a button styled as the frame it sits in — the zoom
+   affordance itself — so it carries a button's reset and the cursor that
+   says "this opens bigger" without ever navigating away. */
+.ai-studio-msg-img {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  text-align: inherit;
+  cursor: zoom-in;
+}
+
+.ai-images-tile img {
+  cursor: zoom-in;
+}
+

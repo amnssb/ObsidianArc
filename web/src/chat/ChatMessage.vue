@@ -196,6 +196,9 @@ function describe(value: MessageStats): string {
 
         <template v-else>
           <OaMarkdown class="ai-answer" :text="props.message.content" />
+          <!-- An answer can be the pictures themselves: a generation recorded
+               into this conversation, or a model that drew inline. -->
+          <ChatAttachments v-if="images.length && !props.message.error" :images="images" />
           <div class="ai-msg-actions">
             <button v-if="!busy" type="button" class="ai-chat-mini-btn" @click="beginEdit">
               {{ t('edit') }}
