@@ -36,6 +36,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/provider"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/quota"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/reqlog"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/screening"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/secret"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/settings"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/trial"
@@ -338,6 +339,65 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 		Secret:  func() string { return settingsService.Get(settings.TurnstileSecretKey) },
 	}
 
+	// Asking a model whether a sign-up looks like a person.
+	//
+	// Everything that can go wrong here lets the registration through: a
+	// model that was deleted, a provider that is down, an answer that will
+	// not parse. Refusing everybody because an upstream hiccuped turns a spam
+	// filter into an outage of the front door.
+	reviewer := screening.Reviewer{
+		Registry: registry,
+		Resolve: func(ctx context.Context) (adapter.Provider, adapter.ModelSpec, error) {
+			record, err := models.ByID(ctx, settingsService.Get(settings.SignupReviewModel))
+			if err != nil {
+				return adapter.Provider{}, adapter.ModelSpec{}, err
+			}
+			upstream, err := providers.Resolve(ctx, record.ProviderID)
+			if err != nil {
+				return adapter.Provider{}, adapter.ModelSpec{}, err
+			}
+			return upstream, record.Spec(), nil
+		},
+	}
+	authService.ReviewSignup = func(ctx context.Context, in auth.RegisterInput, fromAddress int) error {
+		if !settingsService.Bool(settings.SignupReview) ||
+			settingsService.Get(settings.SignupReviewModel) == "" {
+			return nil
+		}
+
+		mode := screening.ParseMode(settingsService.Get(settings.SignupReviewMode))
+		verdict, err := reviewer.Review(ctx, mode, screening.Facts{
+			Username: in.Username, Email: in.Email, QQ: in.QQ, Nickname: in.Nickname,
+			IP: in.IP, UserAgent: in.UA, FromThisAddress: fromAddress,
+		})
+		if err != nil {
+			// Always worth saying: an operator needs to know their reviewer is
+			// broken. Whether it also refuses is the mode's decision, made in
+			// the verdict, and strict is the one that says yes.
+			slog.WarnContext(ctx, "signup review could not answer",
+				"username", in.Username, "mode", mode, "allowed", verdict.Allow, "error", err)
+		}
+		if verdict.Allow {
+			return nil
+		}
+		// The model's own words go here and nowhere else. What the visitor
+		// sees is the operator's message: a model's reasoning about somebody
+		// is not a thing to hand them.
+		slog.InfoContext(ctx, "signup refused by review",
+			"username", in.Username, "ip", in.IP, "reason", verdict.Reason)
+		return auth.ErrSignupRefused
+	}
+
+	adminTryReview := func(ctx context.Context, in admin.ReviewTrial) (bool, string, error) {
+		verdict, err := reviewer.Review(ctx,
+			screening.ParseMode(settingsService.Get(settings.SignupReviewMode)),
+			screening.Facts{
+				Username: in.Username, Email: in.Email, QQ: in.QQ, Nickname: in.Nickname,
+				UserAgent: in.UserAgent, FromThisAddress: in.FromThisAddress,
+			})
+		return verdict.Allow, verdict.Reason, err
+	}
+
 	apiKeyHandlers := apikey.NewHandlers(keys)
 	apiKeyHandlers.Challenge = turnstile.Gate{
 		Client:  challengeClient,
@@ -382,7 +442,9 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	compatHandlers.Routes(mux)
 	announcement.NewHandlers(announcements).Routes(mux)
 	trial.NewHandlers(settingsService, models, registry, proxyTrust, cfg.SecretKey).Routes(mux)
-	admin.NewHandlers(db, users, groups, providers, models, settingsService, registry, authService, usageStore, quotaService, conversations, gallery, announcements, keys, requestLog, cards, healthStore).Routes(mux)
+	adminHandlers := admin.NewHandlers(db, users, groups, providers, models, settingsService, registry, authService, usageStore, quotaService, conversations, gallery, announcements, keys, requestLog, cards, healthStore)
+	adminHandlers.TryReview = adminTryReview
+	adminHandlers.Routes(mux)
 
 	// Anything under /api that no module claimed is a client bug, and should
 	// read as one instead of quietly returning the SPA shell.

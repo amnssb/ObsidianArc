@@ -159,6 +159,10 @@ var writableSettings = map[string]bool{
 	settings.TurnstileSecretKey:    true,
 	settings.TurnstileOnSignup:     true,
 	settings.TurnstileOnAPIKey:     true,
+	settings.SignupReview:          true,
+	settings.SignupReviewModel:     true,
+	settings.SignupReviewMode:      true,
+	settings.SignupReviewRefusal:   true,
 	settings.AdminsBypassQuota:     true,
 	settings.HealthProbe:           true,
 	settings.HealthWindowMins:      true,
@@ -279,7 +283,7 @@ func (h *Handlers) updateSettings(w http.ResponseWriter, r *http.Request) error 
 	if err := h.settings.SetMany(r.Context(), body); err != nil {
 		return httpx.Internal(err)
 	}
-	return httpx.WriteJSON(w, http.StatusOK, map[string]any{"settings": h.settings.All()})
+	return httpx.WriteJSON(w, http.StatusOK, map[string]any{"settings": redacted(h.settings.All())})
 }
 
 // --- settings as a document ---------------------------------------------------
@@ -363,7 +367,7 @@ func (h *Handlers) importSettings(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Internal(err)
 	}
 	return httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"settings": h.settings.All(),
+		"settings": redacted(h.settings.All()),
 		"applied":  len(applied),
 		"skipped":  skipped,
 	})
