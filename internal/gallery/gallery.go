@@ -8,6 +8,7 @@ package gallery
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
@@ -140,4 +141,31 @@ func (s *Store) Delete(ctx context.Context, userID, imageID string) error {
 		return httpx.NotFound("No such picture.")
 	}
 	return nil
+}
+
+// DeleteBefore removes every picture written before a moment. The whole row,
+// unlike the attachment sweep, which hollows its rows out: nothing references
+// a generated picture except its own listing, so an expired one leaves
+// nothing behind that any transcript could still point at.
+func (s *Store) DeleteBefore(ctx context.Context, createdBefore int64) (int64, error) {
+	result, err := s.db.Exec(ctx,
+		`DELETE FROM generated_images WHERE created_at < ?`, createdBefore)
+	if err != nil {
+		return 0, fmt.Errorf("gallery: delete before %d: %w", createdBefore, err)
+	}
+	dropped, _ := result.RowsAffected()
+	return dropped, nil
+}
+
+// Held reports what every gallery on the instance currently stores, so an
+// operator can see whether a retention policy has anything to chew on — the
+// same figure the attachment sweep shows for uploads.
+func (s *Store) Held(ctx context.Context) (count int64, bytes int64, err error) {
+	err = s.db.QueryRow(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(byte_size), 0) FROM generated_images`).
+		Scan(&count, &bytes)
+	if err != nil {
+		return 0, 0, fmt.Errorf("gallery: held: %w", err)
+	}
+	return count, bytes, nil
 }

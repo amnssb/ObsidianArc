@@ -47,12 +47,13 @@ type fixture struct {
 type stubUpstream struct {
 	server *httptest.Server
 
-	mu       sync.Mutex
-	frames   []string
-	status   int
-	body     string
-	requests []map[string]any
-	hold     chan struct{}
+	mu        sync.Mutex
+	frames    []string
+	status    int
+	body      string
+	plainBody bool
+	requests  []map[string]any
+	hold      chan struct{}
 }
 
 func newStubUpstream(t *testing.T) *stubUpstream {
@@ -68,10 +69,17 @@ func newStubUpstream(t *testing.T) *stubUpstream {
 		frames := append([]string(nil), stub.frames...)
 		status := stub.status
 		body := stub.body
+		plain := stub.plainBody
 		hold := stub.hold
 		stub.mu.Unlock()
 
 		if status >= 400 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+			return
+		}
+		if plain {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
 			_, _ = io.WriteString(w, body)
@@ -114,6 +122,19 @@ func (s *stubUpstream) fail(status int, body string) {
 	defer s.mu.Unlock()
 	s.status = status
 	s.body = body
+}
+
+// plain makes the stub answer with one ordinary JSON body instead of an
+// event stream — the shape a Stream:false request is decoded from, which is
+// what the image studio's chat-path generations send.
+func (s *stubUpstream) plain(body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frames = nil
+	s.status = 200
+	s.body = body
+	s.plainBody = true
+	s.hold = nil
 }
 
 func (s *stubUpstream) blockAfterFirstFrame(frames ...string) chan struct{} {

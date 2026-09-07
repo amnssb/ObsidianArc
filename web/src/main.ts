@@ -9,7 +9,6 @@ import { renderAuthPage } from './auth/auth-page';
 import { showUnauthorizedModal } from './auth/unauthorized-modal';
 import { renderVerifyPage } from './auth/verify-page';
 import { renderChatPage } from './chat/chat-page';
-import { renderImagesPage } from './chat/images-page';
 import { renderLandingPage } from './landing/landing-page';
 import { renderKeysPage } from './settings/api-keys';
 import { renderSettingsPage } from './settings/settings-page';
@@ -47,7 +46,7 @@ const routes: Route[] = [
   { pattern: '/keys', render: guarded(renderKeysPage) },
   { pattern: '/usage', render: guarded(renderUsagePage) },
   { pattern: '/about', render: guarded(renderAboutPage) },
-  { pattern: '/images', render: guarded(renderImagesPage) },
+  { pattern: '/images', render: guarded((target) => { renderChatPage(target, { imageMode: true }); }) },
   { pattern: '/admin/*', render: guarded(adminOnly(admin)) },
   { pattern: '/admin', render: guarded(adminOnly(admin)) },
 ];

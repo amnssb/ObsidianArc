@@ -21,6 +21,18 @@ export interface GenerateInput {
   prompt: string;
   ratio: string;
   count: number;
+  /**
+   * Diffusion sampling steps, when the reader set one. Absent — never zero —
+   * so endpoints without the field, and the strict official images API among
+   * them, never see an argument they would refuse.
+   */
+  steps?: number;
+  /**
+   * Uploads (via the attachment endpoint) sent along as reference material.
+   * The server consumes them on success; on failure they stay in the
+   * composer, so a corrected description can be sent without re-uploading.
+   */
+  attachment_ids?: string[];
 }
 
 export function generateImages(input: GenerateInput): Promise<{ images: GeneratedImage[] }> {

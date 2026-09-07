@@ -5,6 +5,10 @@
 # Runtime state: the database, the generated secret key, uploads.
 /data/
 
+# Local demo fixtures: a throwaway user tree and its throwaway database.
+/.demo-user/
+/data-demo/
+
 # Frontend
 web/node_modules/
 web/.vite/

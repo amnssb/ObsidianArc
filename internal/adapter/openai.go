@@ -282,6 +282,12 @@ func (openAIAdapter) Images(ctx context.Context, client *http.Client, p Provider
 	if req.Size != "" {
 		body["size"] = req.Size
 	}
+	// Only sent when the reader set it: the official images API rejects
+	// arguments it does not know, and "steps" belongs to the self-hosted
+	// diffusion endpoints that share this wire format.
+	if req.Steps > 0 {
+		body["steps"] = req.Steps
+	}
 
 	response, err := postJSON(ctx, client, p, endpoint, body)
 	if err != nil {

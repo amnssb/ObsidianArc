@@ -201,7 +201,7 @@ for a week. Do not write anything into the README that claims otherwise.
 change moves one of those numbers, re-measure and update it in the same change.
 They drifted to nearly double once because nobody re-ran the build.
 
-Current: 16.9 MB binary; 72.7 kB on the wire to open the chat, against a
+Current: 17.3 MB binary; 75.2 kB on the wire to open the chat, against a
 target of 80. The backoffice, the Chinese dictionary and the LaTeX renderer are
 separate chunks, fetched only by the readers who need them — so a static import
 reaching into `admin/`, `i18n.zh` or `chat/math` from the main graph silently

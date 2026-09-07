@@ -35,6 +35,11 @@
   --ai-focus-shadow: rgba(24, 24, 27, 0.22);
   --ai-shadow-md: 0 8px 24px rgba(28, 27, 31, 0.14);
   --ai-danger: #b91c1c;
+  /* 生图 mode's own canvas: a beige ground that sets the drawing surface
+     apart from the chat at a glance, and a wider, softer shadow for the
+     floating composer card that sits on it. */
+  --ai-studio-canvas: #f6f1e8;
+  --ai-studio-shadow: 0 18px 48px rgba(52, 44, 30, 0.10), 0 2px 10px rgba(52, 44, 30, 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -58,6 +63,8 @@
     --ai-focus-shadow: rgba(255, 255, 255, 0.28);
     --ai-shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
     --ai-danger: #ff9a9a;
+    --ai-studio-canvas: #211f1b;
+    --ai-studio-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -81,6 +88,8 @@
   --ai-focus-shadow: rgba(255, 255, 255, 0.28);
   --ai-shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
   --ai-danger: #ff9a9a;
+  --ai-studio-canvas: #211f1b;
+  --ai-studio-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
 .ai-chat {
@@ -1019,47 +1028,301 @@
   cursor: default;
 }
 
-/* --- image studio ------------------------------------------------------------------
-   A full page at /images, reached from the composer's + menu. Generation is not a
-   conversation, so it gets its own surface: one centered column for the composer and
-   a responsive grid of everything this account has generated. It is drawn inside the
-   shared shell, so the header keeps its place; only the content below changes. */
+/* --- 生图 mode: the image studio -----------------------------------------------
+   Entering 生图 replaces the conversation in place on the same shell — no page of
+   its own, no separate navigation. A beige canvas marks the mode; the composer is
+   one floating card on it: the prompt on top, upload and parameter settings lower
+   left, the round send button lower right. Everything generated is stored
+   server-side and reappears in the gallery below, and the same grid is the album
+   in settings. */
 
-.ai-images {
+.ai-studio {
   box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  width: min(880px, 100%);
+  overflow-y: auto;
+  padding: 16px 24px 44px;
+  border-radius: 18px;
+  background: var(--ai-studio-canvas);
+  scrollbar-width: thin;
+  scrollbar-color: var(--ai-border) transparent;
+}
+
+.ai-studio-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(720px, 100%);
   margin: 0 auto;
-  padding: 26px 20px 48px;
 }
 
-.ai-images-hero {
+.ai-studio-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-studio-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ai-surface-card);
+  color: var(--ai-text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+
+.ai-studio-exit:hover {
+  color: var(--ai-text);
+  background: var(--ai-surface-container-high);
+}
+
+/* The floating card. Pushed toward the upper middle of the canvas rather than
+   the exact centre, so the gallery below is already in view on a short screen. */
+.ai-studio-card {
+  box-sizing: border-box;
+  width: min(720px, 100%);
+  margin: clamp(24px, 8vh, 96px) auto 0;
+  padding: 12px 14px 10px;
+  border-radius: 26px;
+  background: var(--ai-surface-card);
+  box-shadow: var(--ai-studio-shadow);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  transition: box-shadow 0.18s ease;
 }
 
-.ai-images-title {
-  margin: 0;
-  font-size: 21px;
-  font-weight: 650;
+/* Focus lives on the card, not on the textarea inside it: the card is the
+   field, so a ring on the textarea would draw a frame inside a frame. */
+.ai-studio-card:focus-within {
+  box-shadow: var(--ai-studio-shadow), 0 0 0 3px var(--ai-focus-shadow);
 }
 
-.ai-images-subtitle {
-  margin: 0;
-  font-size: 12.5px;
+.ai-studio-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 2px 4px 0;
+}
+
+.ai-studio-refs[hidden] {
+  display: none;
+}
+
+.ai-studio-ref {
+  position: relative;
+}
+
+.ai-studio-ref-img {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.ai-studio-ref-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--ai-surface-card);
   color: var(--ai-text-secondary);
+  box-shadow: var(--ai-shadow-md);
+  cursor: pointer;
 }
 
-.ai-images-composer {
+.ai-studio-ref-remove:hover {
+  color: var(--ai-text);
+}
+
+/* The card is the field: a placeholder and a caret, nothing drawn around them. */
+.ai-studio-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 58px;
+  max-height: 220px;
+  padding: 10px 8px 2px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ai-text);
+  font-family: inherit;
+  font-size: 14.5px;
+  line-height: 1.6;
+  resize: none;
+}
+
+.ai-studio-input::placeholder {
+  color: var(--ai-text-secondary);
+  opacity: 0.75;
+}
+
+.ai-studio-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.ai-studio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-studio-left {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The upload affordance is a capsule; parameter settings is a bare label with
+   a chevron's manners — the settings are one click away, but not dressed up to
+   compete with the description for attention. */
+.ai-studio-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 999px;
+  background: var(--ai-field-bg);
+  color: var(--ai-text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+
+.ai-studio-upload:hover:not(:disabled) {
+  background: var(--ai-field-bg-hover);
+  color: var(--ai-text);
+}
+
+.ai-studio-upload:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-studio-params {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ai-text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.13s ease, color 0.13s ease;
+}
+
+.ai-studio-params:hover,
+.ai-studio-params[aria-expanded="true"] {
+  background: var(--ai-state-hover);
+  color: var(--ai-text);
+}
+
+.ai-studio-params-menu {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 18px;
-  border-radius: 18px;
-  background: var(--ai-surface-container);
+  width: 280px;
+}
+
+.ai-studio-params-halves {
+  display: flex;
+  gap: 16px;
+}
+
+.ai-studio-params-half {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ai-studio-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--ai-primary);
+  color: var(--ai-primary-text);
+  cursor: pointer;
+  transition: background 0.13s ease, opacity 0.13s ease;
+}
+
+.ai-studio-send:hover:not(:disabled) {
+  background: var(--ai-primary-hover);
+}
+
+.ai-studio-send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* While a generation runs the arrow turns slowly — enough to say "working"
+   without a second element to keep aligned. */
+.ai-studio-send.working svg {
+  animation: ai-studio-spin 1.1s linear infinite;
+}
+
+@keyframes ai-studio-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-studio-note {
+  width: min(720px, 100%);
+  margin: 10px auto 0;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ai-text-secondary);
+}
+
+.ai-studio-note.error {
+  color: var(--ai-danger);
+}
+
+.ai-studio-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(720px, 100%);
+  margin: 28px auto 0;
 }
 
 .ai-images-label {
@@ -1068,6 +1331,7 @@
   font-weight: 600;
   color: var(--ai-text-secondary);
 }
+
 
 /* The model row is pills, not a list: on this page an image model is one of a
    handful, and a pill names it in one line where a list would spend three. */
@@ -1106,25 +1370,6 @@
   color: var(--ai-text-secondary);
 }
 
-.ai-images-halves {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-}
-
-.ai-images-half {
-  display: flex;
-  flex: 1 1 220px;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ai-images-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .ai-images-pill-group {
   display: flex;
   flex-wrap: wrap;
@@ -1151,7 +1396,7 @@
   color: var(--ai-primary-text);
 }
 
-.ai-images-prompt,
+/* The style-notes field in the parameter settings. */
 .ai-images-extra {
   box-sizing: border-box;
   width: 100%;
@@ -1166,57 +1411,14 @@
   resize: vertical;
 }
 
-.ai-images-prompt:focus,
 .ai-images-extra:focus {
   outline: none;
   box-shadow: 0 0 0 3px var(--ai-focus-shadow);
 }
 
-.ai-images-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.ai-images-generate {
-  padding: 9px 26px;
-  border: none;
-  border-radius: 999px;
-  background: var(--ai-primary);
-  color: var(--ai-primary-text);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.13s ease;
-}
-
-.ai-images-generate:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ai-images-generate:not(:disabled):hover {
-  background: var(--ai-primary-hover);
-}
-
-.ai-images-status {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--ai-danger);
-}
-
-.ai-images-gallery {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* The gallery fills the page width in an auto-fill grid, so two tiles sit on a
-   phone and five on a wide monitor without a media query. The tile buttons stay
-   visible rather than appearing on hover — the same lesson the code-copy
-   button taught. */
+/* The gallery is an auto-fill grid, so two tiles sit on a phone and five on a
+   wide monitor without a media query. The tile buttons stay visible rather
+   than appearing on hover — the same lesson the code-copy button taught. */
 .ai-images-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -1277,6 +1479,21 @@
   color: var(--ai-text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The album's selection affordance: top-left, so it never lands on the
+   download and delete buttons top-right. A native checkbox, accent-coloured
+   like every other check here — the batch download is a management action,
+   and a painted tick would be a control assistive tech could not see. */
+.ai-images-tile-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--ai-primary);
+  cursor: pointer;
 }
 
 /* --- narrow skin: a compact widget, e.g. embedded in a sidebar or popover -------- */

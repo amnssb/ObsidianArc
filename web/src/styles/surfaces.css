@@ -1363,6 +1363,21 @@
   align-items: center;
 }
 
+/* The album's batch toolbar: the count reads between the two actions and the
+   download sits at the far end, where a hand coming to collect lands last. */
+.oa-album-toolbar {
+  margin-bottom: 10px;
+}
+
+.oa-album-toolbar .oa-btn:last-child {
+  margin-left: auto;
+}
+
+.oa-album-count {
+  font-size: 12px;
+  color: var(--ai-text-secondary);
+}
+
 .oa-settings-panel .oa-select,
 .oa-settings-panel input[type='text'],
 .oa-settings-panel input[type='email'],

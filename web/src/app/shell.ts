@@ -110,6 +110,18 @@ function accountMenu(account: Account) {
       },
     }));
 
+    // The album is the account's own gallery — every picture the image
+    // toolbox has produced for this account. It lives as a section of
+    // settings, and the query is what opens that section directly.
+    menu.appendChild(menuItem({
+      title: t('navAlbum'),
+      leading: icon(ICONS.image, 14),
+      onSelect: () => {
+        close();
+        navigate('/settings?panel=album');
+      },
+    }));
+
     menu.appendChild(menuItem({
       title: t('navUsage'),
       leading: icon(ICONS.chart, 14),

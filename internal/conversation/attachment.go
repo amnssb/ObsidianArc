@@ -286,3 +286,27 @@ func (s *Store) DeleteOrphans(ctx context.Context, olderThan time.Duration) (int
 	removed, _ := result.RowsAffected()
 	return removed, nil
 }
+
+// DeleteUnsent removes named uploads that are still not attached to any
+// message, scoped to their owner. The image studio consumes a reference
+// picture the moment its generation is dispatched; without this the row
+// would sit out the orphan window anyway, holding bytes that already did
+// their job.
+//
+// A row that has since been linked to a message is left alone — the check
+// is in the query, so a turn and a cleanup cannot disagree about who owns
+// the picture.
+func (s *Store) DeleteUnsent(ctx context.Context, userID string, ids []string) (int64, error) {
+	var removed int64
+	for _, attachmentID := range ids {
+		result, err := s.db.Exec(ctx,
+			`DELETE FROM attachments WHERE id = ? AND user_id = ? AND message_id IS NULL`,
+			attachmentID, userID)
+		if err != nil {
+			return removed, fmt.Errorf("conversation: delete unsent attachment: %w", err)
+		}
+		affected, _ := result.RowsAffected()
+		removed += affected
+	}
+	return removed, nil
+}

@@ -131,3 +131,58 @@ func TestByteCeilingIsEnforced(t *testing.T) {
 		t.Fatalf("expected gallery_full, got %v", err)
 	}
 }
+
+// Retention is the one sweep that removes gallery rows outright. Nothing
+// outside the gallery references a generated picture, so an expired one is
+// deleted whole rather than hollowed out the way a chat attachment is — and
+// the sweep crosses owners, because it answers to the operator's disk, not
+// to anyone's account.
+func TestDeleteBeforeSweepsExpiredPictures(t *testing.T) {
+	store, owner, other := newStore(t)
+	ctx := context.Background()
+
+	first, err := store.Save(ctx, Image{
+		UserID: owner, ModelName: "Painter", Prompt: "older", MIME: "image/png",
+	}, []byte("first-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Save(ctx, Image{
+		UserID: owner, ModelName: "Painter", Prompt: "newer", MIME: "image/png",
+	}, []byte("second-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := store.Save(ctx, Image{
+		UserID: other, ModelName: "Painter", Prompt: "someone else's", MIME: "image/png",
+	}, []byte("third-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	count, bytes, err := store.Held(ctx)
+	if err != nil || count != 3 ||
+		bytes != int64(len("first-bytes")+len("second-bytes")+len("third-bytes")) {
+		t.Fatalf("held = (%d, %d): %v", count, bytes, err)
+	}
+
+	// Two saves can land in the same millisecond, so the rows meant to expire
+	// are backdated rather than trusting the clock to separate them.
+	if _, err := store.db.Exec(ctx,
+		`UPDATE generated_images SET created_at = ? WHERE id IN (?, ?)`,
+		first.CreatedAt-60000, first.ID, foreign.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.DeleteBefore(ctx, first.CreatedAt)
+	if err != nil || removed != 2 {
+		t.Fatalf("delete before removed %d: %v", removed, err)
+	}
+	count, bytes, err = store.Held(ctx)
+	if err != nil || count != 1 || bytes != int64(len("second-bytes")) {
+		t.Fatalf("held after sweep = (%d, %d): %v", count, bytes, err)
+	}
+	if _, _, err := store.Open(ctx, owner, second.ID); err != nil {
+		t.Fatalf("the sweep took the wrong pictures: %v", err)
+	}
+}

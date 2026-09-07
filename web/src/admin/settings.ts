@@ -326,6 +326,17 @@ export async function renderSettings(view: AdminView): Promise<void> {
     hint: t('attachmentOrphanMinutesHint'),
   });
 
+  // The galleries have their own retention dial: a generated picture is a
+  // record the account paid for, so unlike uploads the default is forever
+  // and an age limit is the operator's decision to name.
+  const imageRetainDays = numberField({
+    label: t('imageRetainDays'),
+    value: Number(values['images.retain_days'] ?? 0),
+    min: 0,
+    max: 3650,
+    hint: t('imageRetainDaysHint'),
+  });
+
   const apiEnabled = switchField({
     label: t('apiEnabled'),
     value: values['api.enabled'] === 'true',
@@ -444,6 +455,10 @@ export async function renderSettings(view: AdminView): Promise<void> {
   form.appendChild(orphanMinutes.element);
   form.appendChild(heldPanel(data.attachments));
 
+  form.appendChild(section(t('secImages'), t('imagesHint')));
+  form.appendChild(imageRetainDays.element);
+  form.appendChild(galleryFigure(data.gallery));
+
   form.appendChild(section(t('secLiveness'), t('livenessHint')));
   form.appendChild(healthProbe.element);
   form.appendChild(healthWindow.element);
@@ -513,6 +528,7 @@ export async function renderSettings(view: AdminView): Promise<void> {
       'attachments.purge_after_days': String(purgeAfterDays.value() ?? 0),
       'attachments.purge_daily_at': purgeDailyAt.value(),
       'attachments.orphan_minutes': String(orphanMinutes.value() ?? 60),
+      'images.retain_days': String(imageRetainDays.value() ?? 0),
       'health.probe': String(healthProbe.value()),
       'health.window_minutes': String(healthWindow.value() ?? 30),
       'health.disable_after': String(healthDisableAfter.value() ?? 0),
@@ -564,6 +580,23 @@ export async function renderSettings(view: AdminView): Promise<void> {
 
     wrap.appendChild(figure);
     wrap.appendChild(purge);
+    return wrap;
+  }
+
+  /**
+   * What the galleries hold right now, as a figure and nothing else.
+   *
+   * There is no purge button beside it: the retention sweep is the only
+   * thing that removes generated pictures, so the honest display of the
+   * policy's effect is a number that shrinks when the policy says so.
+   */
+  function galleryFigure(initial: { count: number; bytes: number }): HTMLElement {
+    const wrap = el('div', 'oa-field');
+    const figure = el('p', 'oa-field-hint');
+    figure.textContent = initial.count
+      ? t('galleryHeld', { count: initial.count, size: megabytes(initial.bytes) })
+      : t('galleryHeldNone');
+    wrap.appendChild(figure);
     return wrap;
   }
 

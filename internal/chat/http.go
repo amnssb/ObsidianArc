@@ -468,10 +468,12 @@ func translateConversationError(err error) error {
 // --- image toolbox -------------------------------------------------------------
 
 type imageGenerateRequest struct {
-	ModelID string `json:"model_id"`
-	Prompt  string `json:"prompt"`
-	Ratio   string `json:"ratio"`
-	Count   int    `json:"count"`
+	ModelID       string   `json:"model_id"`
+	Prompt        string   `json:"prompt"`
+	Ratio         string   `json:"ratio"`
+	Count         int      `json:"count"`
+	AttachmentIDs []string `json:"attachment_ids"`
+	Steps         int      `json:"steps"`
 }
 
 // generateImage runs one generation and answers with what was stored. Unlike
@@ -487,12 +489,22 @@ func (h *Handlers) generateImage(w http.ResponseWriter, r *http.Request) error {
 	if body.ModelID != "" && !id.Valid(body.ModelID) {
 		return httpx.BadRequest("Malformed model id.")
 	}
+	for _, attachmentID := range body.AttachmentIDs {
+		if !id.Valid(attachmentID) {
+			return httpx.BadRequest("Malformed attachment id.")
+		}
+	}
+	if len(body.AttachmentIDs) > MaxReferenceImages {
+		return httpx.BadRequest("At most %d reference images per generation.", MaxReferenceImages)
+	}
 
 	images, err := h.service.GenerateImages(r.Context(), account, GenerateRequest{
-		ModelID: body.ModelID,
-		Prompt:  body.Prompt,
-		Ratio:   body.Ratio,
-		Count:   body.Count,
+		ModelID:       body.ModelID,
+		Prompt:        body.Prompt,
+		Ratio:         body.Ratio,
+		Count:         body.Count,
+		AttachmentIDs: body.AttachmentIDs,
+		Steps:         body.Steps,
 	})
 	if err != nil {
 		// The spend check's refusals are already person-shaped httpx errors;

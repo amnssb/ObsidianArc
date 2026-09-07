@@ -3,6 +3,7 @@ package conversation
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -57,6 +58,73 @@ func upload(t *testing.T, store *Store, userID string, size int) error {
 		Data:   bytes.Repeat([]byte{1}, size),
 	})
 	return err
+}
+
+// DeleteUnsent backs the image studio's reference pictures: a successful
+// generation is what consumes the upload, and the delete must reach only
+// the rows still waiting for a message.
+func TestDeleteUnsentSparesLinkedRows(t *testing.T) {
+	store, users, account := attachmentFixture(t)
+	ctx := context.Background()
+
+	spent, err := store.Upload(ctx, UploadInput{
+		UserID: account.ID, Mime: "image/png", Data: bytes.Repeat([]byte{2}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := store.Upload(ctx, UploadInput{
+		UserID: account.ID, Mime: "image/png", Data: bytes.Repeat([]byte{3}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The spent one is linked to a message first, the way a sent turn
+	// claims its uploads. The conversation carries no model: the link is
+	// what is under test, not the transcript.
+	chat, err := store.Create(ctx, nil, account.ID, "chat", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Append(ctx, nil, AppendInput{
+		ConversationID: chat.ID,
+		UserID:         account.ID,
+		Role:           RoleUser,
+		Content:        "look",
+		AttachmentIDs:  []string{spent.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	other, err := users.Create(ctx, nil, user.CreateInput{
+		Username: "someone-else", PasswordHash: "x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := store.Upload(ctx, UploadInput{
+		UserID: other.ID, Mime: "image/png", Data: bytes.Repeat([]byte{4}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.DeleteUnsent(ctx, account.ID, []string{spent.ID, kept.ID, foreign.ID})
+	if err != nil || removed != 1 {
+		t.Fatalf("removed %d: %v", removed, err)
+	}
+	// The linked row survives the delete even though its id was named: a
+	// message owns it now, not the composer.
+	if _, _, err := store.Blob(ctx, account.ID, spent.ID); err != nil {
+		t.Fatalf("took an upload a message already claimed: %v", err)
+	}
+	if _, _, err := store.Blob(ctx, account.ID, kept.ID); !errors.Is(err, ErrAttachmentNotFound) {
+		t.Errorf("the named unsent upload is still readable: %v", err)
+	}
+	if _, _, err := store.Blob(ctx, other.ID, foreign.ID); err != nil {
+		t.Errorf("took someone else's upload by naming its id: %v", err)
+	}
 }
 
 func TestPendingUploadsAreCapped(t *testing.T) {

@@ -440,6 +440,7 @@ export const adminApi = {
       groups: Group[];
       mail_configured: boolean;
       attachments: HeldAttachments;
+      gallery: { count: number; bytes: number };
     }>(
       '/api/admin/settings',
     ),

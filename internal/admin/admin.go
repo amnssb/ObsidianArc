@@ -21,6 +21,7 @@ import (
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/card"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/conversation"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/database"
+	"github.com/OnyxAxisOwO/ObsidianArc/internal/gallery"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/group"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/health"
 	"github.com/OnyxAxisOwO/ObsidianArc/internal/httpx"
@@ -46,6 +47,7 @@ type Handlers struct {
 	usage         *usage.Store
 	quota         *quota.Service
 	conversations *conversation.Store
+	gallery       *gallery.Store
 	announcements *announcement.Store
 	keys          *apikey.Store
 	requests      *reqlog.Store
@@ -69,6 +71,7 @@ func NewHandlers(
 	usageStore *usage.Store,
 	quotaService *quota.Service,
 	conversations *conversation.Store,
+	galleryStore *gallery.Store,
 	announcements *announcement.Store,
 	keys *apikey.Store,
 	requests *reqlog.Store,
@@ -87,6 +90,7 @@ func NewHandlers(
 		usage:         usageStore,
 		quota:         quotaService,
 		conversations: conversations,
+		gallery:       galleryStore,
 		announcements: announcements,
 		keys:          keys,
 		requests:      requests,

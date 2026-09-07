@@ -14,6 +14,7 @@ import { currentPreferences, currentUser, isAdmin, syncPreferences } from '../se
 import { t } from '../i18n';
 import { ICONS, iconButton } from '../ui/dom';
 import { attachResizer } from '../ui/resizer';
+import { mountImageStudio, type ImageStudioOptions } from './images-page';
 import { mountChat, type ChatHandle, type ChatStatus } from './chat';
 import type { Effort, ReasoningState } from './composer-menu';
 import { createModelControl } from './model-picker';
@@ -22,17 +23,35 @@ const RAIL_COLLAPSED_KEY = 'obsidian-arc-rail-collapsed';
 
 let live: ChatHandle | null = null;
 
+export interface ChatPageOptions {
+  /**
+   * Draws the image studio in place of the conversation, on the same shell.
+   *
+   * 生图 is a mode of the chat screen rather than a page of its own: the
+   * studio fills the body the transcript would, and leaving it hands the
+   * surface back — which is why the exit is a callback and not a route.
+   */
+  imageMode?: boolean;
+}
+
 /**
  * Draws the chat screen and returns the flex row it lives in, so a caller can
  * open a side panel as a column beside it — which is how /settings is drawn.
  */
-export function renderChatPage(root: HTMLElement): HTMLElement {
+export function renderChatPage(root: HTMLElement, options: ChatPageOptions = {}): HTMLElement {
   // Leaving the page mid-generation aborts the turn; the server still saves
   // whatever streamed before that.
   live?.destroy();
   live = null;
 
   const shell = renderShell(root);
+
+  if (options.imageMode) {
+    const studio: ImageStudioOptions = { exit: () => navigate('/') };
+    mountImageStudio(shell.body, studio);
+    return shell.body;
+  }
+
   const preferences = currentPreferences();
 
   // Above the chat, not instead of it: this account can still read and

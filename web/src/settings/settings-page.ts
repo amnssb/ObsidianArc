@@ -14,6 +14,8 @@ import { changePassword, updateProfile } from '../api/auth';
 import { ApiError, api } from '../api/client';
 import { exportAccount, importAccount, pickJSONFile, saveAsFile } from '../api/backup';
 import { renderChatPage } from '../chat/chat-page';
+import { downloadImages, imageTile } from '../chat/images-page';
+import { listImages, type GeneratedImage } from '../api/images';
 import { navigate } from '../router';
 import { openPanel } from '../ui/panel';
 import { attachOverlayScrollbar, type OverlayScrollbarHandle } from '../ui/scrollbar';
@@ -39,11 +41,12 @@ import { language, setLanguage, type Language } from '../i18n';
 // came for, so they are grouped into three and shown one group at a time.
 // Which group is a menu rather than a row of tabs: the panel head has room
 // for one more control, not for three labels plus the two buttons beside it.
-type Category = 'appearance' | 'chat' | 'account';
+type Category = 'appearance' | 'chat' | 'album' | 'account';
 
 const CATEGORIES: Array<{ id: Category; label: StringKey }> = [
   { id: 'appearance', label: 'secAppearance' },
   { id: 'chat', label: 'secChat' },
+  { id: 'album', label: 'secAlbum' },
   { id: 'account', label: 'account' },
 ];
 
@@ -66,7 +69,13 @@ export function renderSettingsPage(root: HTMLElement): void {
   const account = currentUser();
   if (!account) return;
 
-  let category: Category = 'appearance';
+  // The album has one door from the account menu: /settings?panel=album.
+  // Anything else — including a stale or misspelt value — lands on the
+  // first section, which is where a plain /settings would have started.
+  const wanted = new URLSearchParams(window.location.search).get('panel');
+  let category: Category = CATEGORIES.some((entry) => entry.id === wanted)
+    ? (wanted as Category)
+    : 'appearance';
   let switchDirection: 'forward' | 'back' | 'rise' = 'rise';
 
   // Handles for in-place tab switches so rail/tabs don't flicker or re-mount
@@ -90,6 +99,8 @@ export function renderSettingsPage(root: HTMLElement): void {
       form.appendChild(wallpaperSection());
     } else if (category === 'chat') {
       form.appendChild(chatSection());
+    } else if (category === 'album') {
+      form.appendChild(albumSection());
     } else {
       form.appendChild(profileSection());
       form.appendChild(passwordSection());
@@ -526,6 +537,109 @@ function chatSection(): HTMLElement {
     });
     wrap.appendChild(stats.element);
   }
+
+  return wrap;
+}
+
+// --- album -----------------------------------------------------------------------
+
+/**
+ * The account's gallery, reached from its own settings tab.
+ *
+ * It is a management view, not a second studio: the grid shares its tiles
+ * with image mode, so a picture deleted here is gone there too, and the
+ * button at the bottom is the way in rather than a duplicate of it.
+ */
+function albumSection(): HTMLElement {
+  const wrap = panel(t('secAlbum'), t('albumHint'));
+  const grid = el('div', 'ai-images-grid oa-album-grid');
+  const empty = el('p', 'ai-images-empty', t('albumEmpty'));
+  empty.hidden = true;
+
+  // The selection is what the batch download sends. Kept as ids beside the
+  // tiles rather than on them, so a picture deleted — here, or from the
+  // studio, which shares these rows — drops out of it without a second
+  // index to keep straight.
+  const selected = new Set<string>();
+  const pictures = new Map<string, GeneratedImage>();
+  const checks = new Map<string, HTMLInputElement>();
+  const tiles = new Map<string, HTMLElement>();
+
+  function sync(): void {
+    const total = pictures.size;
+    const every = total > 0 && selected.size === total;
+    selectAll.textContent = every ? t('albumClear') : t('albumSelectAll');
+    selectAll.disabled = total === 0;
+    download.disabled = selected.size === 0;
+    count.textContent = selected.size > 0 ? t('albumSelectedCount', { count: selected.size }) : '';
+  }
+
+  function pickAll(): void {
+    if (pictures.size > 0 && selected.size < pictures.size) {
+      for (const id of pictures.keys()) selected.add(id);
+    } else {
+      selected.clear();
+    }
+    for (const [id, check] of checks) check.checked = selected.has(id);
+    sync();
+  }
+
+  const count = el('span', 'oa-album-count');
+  const selectAll = button('oa-btn', t('albumSelectAll'), pickAll);
+  const download = button('oa-btn', t('albumDownloadSelected'), () => {
+    downloadImages([...selected].map((id) => pictures.get(id)!).filter(Boolean));
+  });
+
+  const toolbar = el('div', 'oa-button-row oa-album-toolbar');
+  toolbar.appendChild(selectAll);
+  toolbar.appendChild(count);
+  toolbar.appendChild(download);
+
+  const foot = el('div', 'oa-button-row');
+  foot.appendChild(button('oa-btn', t('albumOpenStudio'), () => navigate('/images')));
+
+  wrap.appendChild(toolbar);
+  wrap.appendChild(grid);
+  wrap.appendChild(empty);
+  wrap.appendChild(foot);
+
+  void listImages()
+    .then(({ images }) => {
+      empty.hidden = images.length > 0;
+      for (const image of images) {
+        pictures.set(image.id, image);
+        const tile = imageTile(image, () => {
+          tiles.get(image.id)?.remove();
+          tiles.delete(image.id);
+          checks.delete(image.id);
+          pictures.delete(image.id);
+          selected.delete(image.id);
+          empty.hidden = tiles.size > 0;
+          sync();
+        }, {
+          selectable: true,
+          selected: selected.has(image.id),
+          onToggle: (on) => {
+            if (on) selected.add(image.id);
+            else selected.delete(image.id);
+            sync();
+          },
+        });
+        tiles.set(image.id, tile);
+        const check = tile.querySelector<HTMLInputElement>('input.ai-images-tile-check');
+        if (check) checks.set(image.id, check);
+        grid.appendChild(tile);
+      }
+      sync();
+    })
+    .catch(() => {
+      // A failed listing leaves an honest empty state rather than a grid
+      // pretending there is nothing to manage.
+      empty.hidden = false;
+      empty.textContent = t('failed');
+      selectAll.disabled = true;
+      download.disabled = true;
+    });
 
   return wrap;
 }

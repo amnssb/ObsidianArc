@@ -227,6 +227,11 @@ type ImagesRequest struct {
 	Prompt string
 	N      int
 	Size   string
+	// Diffusion sampling steps, for the self-hosted endpoint family that
+	// takes one. Zero means the endpoint's own default: the OpenAI images
+	// API has no such field, and sending it there is a 400, so the wire
+	// writer must omit it unless the reader actually set a number.
+	Steps int
 }
 
 // GeneratedImage is one picture an images endpoint returned. The MIME type is

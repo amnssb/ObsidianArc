@@ -71,6 +71,11 @@ const (
 	AttachmentPurgeDaily = "attachments.purge_daily_at"
 	AttachmentOrphanMins = "attachments.orphan_minutes"
 
+	// How long a generated picture stays in its owner's gallery. Zero keeps
+	// everything: a gallery nobody set a policy for should not quietly empty
+	// itself, so the sweep only exists once an operator asks for one.
+	ImageRetainDays = "images.retain_days"
+
 	// Liveness. The window is both "how far back counts as evidence" and
 	// "how quiet a model has to be before the system asks it directly",
 	// because those are the same question asked from two sides.
@@ -243,6 +248,9 @@ var Defaults = map[string]string{
 	// which this server holds a picture it has no use for.
 	AttachmentOrphanMins: "60",
 	AttachmentPurgeLast:  "0",
+	// Forever. The gallery is a record the account paid for; removing it is
+	// a policy an operator has to name, not a default to inherit.
+	ImageRetainDays: "0",
 }
 
 type Service struct {

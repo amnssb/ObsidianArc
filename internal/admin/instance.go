@@ -116,11 +116,18 @@ func (h *Handlers) listSettings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Internal(err)
 	}
+	// The same question for the galleries, which have their own retention
+	// setting and therefore owe the screen their own figure.
+	imageCount, imageBytes, err := h.gallery.Held(r.Context())
+	if err != nil {
+		return httpx.Internal(err)
+	}
 
 	return httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"settings":    redacted(h.settings.All()),
 		"groups":      groups,
 		"attachments": map[string]any{"held": held, "bytes": bytes},
+		"gallery":     map[string]any{"count": imageCount, "bytes": imageBytes},
 		// Whether this instance can post mail at all. The verification
 		// setting is inert without it, and the form says so rather than
 		// letting an operator switch on something that does nothing.
@@ -174,6 +181,7 @@ var writableSettings = map[string]bool{
 	settings.AttachmentPurgeDays:   true,
 	settings.AttachmentPurgeDaily:  true,
 	settings.AttachmentOrphanMins:  true,
+	settings.ImageRetainDays:       true,
 }
 
 func (h *Handlers) updateSettings(w http.ResponseWriter, r *http.Request) error {
@@ -240,6 +248,11 @@ func (h *Handlers) updateSettings(w http.ResponseWriter, r *http.Request) error 
 	if raw, present := body[settings.AttachmentPurgeDays]; present {
 		if days, err := strconv.Atoi(strings.TrimSpace(raw)); err != nil || days < 0 || days > 3650 {
 			return httpx.BadRequest("Keep images for between 0 and 3650 days; 0 means no age limit.")
+		}
+	}
+	if raw, present := body[settings.ImageRetainDays]; present {
+		if days, err := strconv.Atoi(strings.TrimSpace(raw)); err != nil || days < 0 || days > 3650 {
+			return httpx.BadRequest("Keep generated images for between 0 and 3650 days; 0 means no age limit.")
 		}
 	}
 	if raw, present := body[settings.AttachmentOrphanMins]; present {

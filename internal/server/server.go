@@ -61,6 +61,7 @@ type Server struct {
 	settings      *settings.Service
 	auth          *auth.Service
 	conversations *conversation.Store
+	gallery       *gallery.Store
 	quota         *quota.Service
 	requests      *reqlog.Store
 	health        *health.Checker
@@ -381,7 +382,7 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 	compatHandlers.Routes(mux)
 	announcement.NewHandlers(announcements).Routes(mux)
 	trial.NewHandlers(settingsService, models, registry, proxyTrust, cfg.SecretKey).Routes(mux)
-	admin.NewHandlers(db, users, groups, providers, models, settingsService, registry, authService, usageStore, quotaService, conversations, announcements, keys, requestLog, cards, healthStore).Routes(mux)
+	admin.NewHandlers(db, users, groups, providers, models, settingsService, registry, authService, usageStore, quotaService, conversations, gallery, announcements, keys, requestLog, cards, healthStore).Routes(mux)
 
 	// Anything under /api that no module claimed is a client bug, and should
 	// read as one instead of quietly returning the SPA shell.
@@ -442,6 +443,7 @@ func New(ctx context.Context, deps Deps) (*Server, error) {
 		settings:      settingsService,
 		auth:          authService,
 		conversations: conversations,
+		gallery:       gallery,
 		quota:         quotaService,
 		requests:      requestLog,
 		health: &health.Checker{
@@ -538,6 +540,7 @@ func (s *Server) sweep(ctx context.Context) {
 	// not letting the table grow forever.
 	_, _ = s.auth.Sessions().DeleteExpired(sweepCtx)
 	s.sweepAttachments(sweepCtx)
+	s.sweepGallery(sweepCtx)
 	// Counter buckets whose window has long since rolled over. The ledger is
 	// never pruned: it is the audit trail.
 	_, _ = s.quota.PruneCounters(sweepCtx)
@@ -607,6 +610,33 @@ func (s *Server) sweepAttachments(ctx context.Context) {
 		slog.InfoContext(ctx, "swept attachments",
 			"aged_out", result.Aged, "purged", result.Purged,
 			"orphans_removed", result.Orphans, "daily_purge", result.RanDaily)
+	}
+}
+
+// sweepGallery applies the operator's image-retention policy: generated
+// pictures older than the configured age are removed outright.
+//
+// Like every other policy this is read per pass, so a change on the settings
+// screen lands on the next tick instead of on the next restart. Zero days is
+// the normal state and means the galleries belong to their owners.
+func (s *Server) sweepGallery(ctx context.Context) {
+	days := s.settings.Int(settings.ImageRetainDays, 0)
+	if days <= 0 {
+		return
+	}
+	galleryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	removed, err := s.gallery.DeleteBefore(galleryCtx,
+		time.Now().AddDate(0, 0, -days).UnixMilli())
+	if err != nil {
+		slog.ErrorContext(ctx, "gallery sweep failed", "error", err)
+		return
+	}
+	// Worth a line, the way the attachment sweep is: this destroys something
+	// readers paid for, and an operator should see it working.
+	if removed > 0 {
+		slog.InfoContext(ctx, "swept expired generated images",
+			"removed", removed, "retain_days", days)
 	}
 }
 
