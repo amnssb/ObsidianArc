@@ -5,9 +5,10 @@ import OaAvatar from '@/components/OaAvatar.vue';
 import OaMenu from '@/components/OaMenu.vue';
 import OaMenuItem from '@/components/OaMenuItem.vue';
 import { t } from '@/composables/useI18n';
-import { IconChart, IconGear, IconInfo, IconKey, IconLogout, IconSliders } from '@/icons';
+import { IconChart, IconGear, IconImage, IconInfo, IconKey, IconLogout, IconSliders } from '@/icons';
 import { displayName } from '@/lib/account';
 import { forget } from '@/stores/session';
+import { openAlbum } from '@/chat/useAlbum';
 
 const props = defineProps<{ account: Account }>();
 
@@ -16,6 +17,11 @@ const router = useRouter();
 function go(close: () => void, path: string): void {
   close();
   void router.push(path);
+}
+
+function album(close: () => void): void {
+  close();
+  openAlbum();
 }
 
 async function signOut(close: () => void): Promise<void> {
@@ -68,6 +74,9 @@ async function signOut(close: () => void): Promise<void> {
         </span>
       </div>
 
+      <OaMenuItem :title="t('navAlbum')" @click="album(close)">
+        <template #leading><IconImage :size="14" /></template>
+      </OaMenuItem>
       <OaMenuItem :title="t('settings')" @click="go(close, '/settings')">
         <template #leading><IconGear :size="14" /></template>
       </OaMenuItem>

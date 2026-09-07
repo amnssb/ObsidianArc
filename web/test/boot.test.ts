@@ -168,6 +168,19 @@ describe('the application, mounted', () => {
     expect(host.querySelector('.oa-settings-tabs')).not.toBeNull();
   });
 
+  it('swaps the conversation for the studio, keeping the rail', async () => {
+    adopt(ACCOUNT);
+    await mountAt('/images');
+
+    // The studio is the main column; the history rail beside it is not a
+    // casualty of the mode — that is the whole point of drawing it in place.
+    expect(host.querySelector('.ai-chat-sidebar')).not.toBeNull();
+    expect(host.querySelector('.ai-studio')).not.toBeNull();
+    expect(host.querySelector('.ai-studio-card')).not.toBeNull();
+    // The conversation's own composer is what got replaced, not the frame.
+    expect(host.querySelector('.ai-chat-composer')).toBeNull();
+  });
+
   it('sends a visitor asking for a panel to the sign-in card', async () => {
     await mountAt('/keys');
     expect(router.currentRoute.value.path).toBe('/login');

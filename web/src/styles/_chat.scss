@@ -1029,12 +1029,12 @@
 }
 
 /* --- 生图 mode: the image studio -----------------------------------------------
-   Entering 生图 replaces the conversation in place on the same shell — no page of
-   its own, no separate navigation. A beige canvas marks the mode; the composer is
-   one floating card on it: the prompt on top, upload and parameter settings lower
-   left, the round send button lower right. Everything generated is stored
-   server-side and reappears in the gallery below, and the same grid is the album
-   in settings. */
+   Entering 生图 replaces the conversation in place on the same shell — the rail
+   keeps its column, the header and banners do not move. The main area behaves
+   like the transcript does: a stream that scrolls, where every generate press
+   appends a card at the bottom, and one floating composer docked under it. A
+   beige canvas marks the mode. The pictures the mode produces are managed from
+   the album in the account menu, not from a grid under the composer. */
 
 .ai-studio {
   box-sizing: border-box;
@@ -1043,61 +1043,165 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  padding: 16px 24px 44px;
   border-radius: 18px;
   background: var(--ai-studio-canvas);
+}
+
+.ai-studio-stream {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px 8px;
   scrollbar-width: thin;
   scrollbar-color: var(--ai-border) transparent;
 }
 
-.ai-studio-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: min(720px, 100%);
-  margin: 0 auto;
+/* An empty stream sits in the middle of the canvas, not at its top: the mode
+   starts from the composer, and the greeting belongs beside it. */
+.ai-studio-empty {
+  margin: auto 0;
 }
 
-.ai-studio-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 15px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-studio-exit {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border: none;
-  border-radius: 999px;
-  background: var(--ai-surface-card);
-  color: var(--ai-text-secondary);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.13s ease, color 0.13s ease;
-}
-
-.ai-studio-exit:hover {
-  color: var(--ai-text);
-  background: var(--ai-surface-container-high);
-}
-
-/* The floating card. Pushed toward the upper middle of the canvas rather than
-   the exact centre, so the gallery below is already in view on a short screen. */
-.ai-studio-card {
+/* One generation, one card — the transcript's unit of conversation is this
+   stream's unit of work. The card rises in from below like a sent message. */
+.ai-studio-msg {
   box-sizing: border-box;
   width: min(720px, 100%);
-  margin: clamp(24px, 8vh, 96px) auto 0;
+  margin: 0 auto 14px;
   padding: 12px 14px 10px;
-  border-radius: 26px;
+  border-radius: 16px;
+  background: var(--ai-surface-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: aiChatSwitch 0.34s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.ai-studio-msg-prompt {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-studio-msg-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 2px;
+  font-size: 12px;
+  color: var(--ai-text-secondary);
+}
+
+/* A quiet ring while the provider is drawing — enough to say "working"
+   without promising progress nobody can measure. */
+.ai-studio-spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ai-border);
+  border-top-color: var(--ai-text-secondary);
+  border-radius: 50%;
+  animation: ai-studio-spin 1.1s linear infinite;
+}
+
+.ai-studio-msg-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ai-danger);
+}
+
+/* One picture reads large; two or four read as a contact sheet. */
+.ai-studio-msg-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-studio-msg-grid[data-count="1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ai-studio-msg-grid[data-count="2"],
+.ai-studio-msg-grid[data-count="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-studio-msg-img {
+  display: block;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ai-surface-container-low);
+}
+
+.ai-studio-msg-grid[data-count="1"] .ai-studio-msg-img {
+  max-width: 420px;
+}
+
+.ai-studio-msg-img img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ai-studio-msg-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ai-text-secondary);
+}
+
+/* The mode's name and its only way out, as one light tag on the composer —
+   not a banner above the stream demanding attention. */
+.ai-studio-tagrow {
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.ai-studio-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--ai-badge-bg);
+  color: var(--ai-badge-text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ai-studio-tag-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.13s ease;
+}
+
+.ai-studio-tag-exit:hover {
+  background: var(--ai-state-hover);
+}
+
+/* The floating composer, docked at the bottom of the canvas — the same place
+   the chat's composer holds, so switching modes moves nothing but the
+   content. Focus lives on the card, not on the textarea inside it. */
+.ai-studio-card {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: min(720px, 100%);
+  margin: 8px auto 14px;
+  padding: 10px 14px 10px;
+  border-radius: 18px;
   background: var(--ai-surface-card);
   box-shadow: var(--ai-studio-shadow);
   display: flex;
@@ -1304,25 +1408,26 @@
   }
 }
 
-.ai-studio-note {
+/* One line between stream and composer, for the standing "saved to your
+   album" note and for the failure a press just met — the same slot the chat
+   keeps its flash in. */
+.ai-studio-flash {
+  display: none;
+  flex-shrink: 0;
   width: min(720px, 100%);
-  margin: 10px auto 0;
-  text-align: center;
+  margin: 0 auto;
+  padding: 0 8px;
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--ai-text-secondary);
 }
 
-.ai-studio-note.error {
-  color: var(--ai-danger);
+.ai-studio-flash.visible {
+  display: block;
 }
 
-.ai-studio-gallery {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: min(720px, 100%);
-  margin: 28px auto 0;
+.ai-studio-flash.error {
+  color: var(--ai-danger);
 }
 
 .ai-images-label {
@@ -1494,6 +1599,94 @@
   margin: 0;
   accent-color: var(--ai-primary);
   cursor: pointer;
+}
+
+/* --- the album drawer ------------------------------------------------------------
+   Reached from the account menu in the header, so it overlays whatever screen
+   is under it rather than asking any one of them for a column. The slide is
+   keyed off the overlay's own .open state: one class moves backdrop and
+   drawer together, and the fade the overlay owns carries the drawer in with
+   it. */
+
+.oa-album-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.oa-album-overlay.open {
+  opacity: 1;
+}
+
+.ai-album-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(560px, 100vw);
+  background: var(--ai-surface-card);
+  box-shadow: var(--ai-shadow-md);
+  transform: translateX(100%);
+  transition: transform 0.24s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.oa-album-overlay.open .ai-album-drawer {
+  transform: translateX(0);
+}
+
+.ai-album-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 12px 18px;
+  color: var(--ai-text);
+}
+
+.ai-album-title {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ai-album-count {
+  font-size: 12px;
+  color: var(--ai-text-secondary);
+}
+
+.ai-album-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px 12px;
+}
+
+.ai-album-toolbar-spacer {
+  flex: 1;
+}
+
+/* The toolbar's delete reads as a pill until armed, then as the danger it is. */
+.ai-album-delete.armed {
+  background: var(--ai-danger);
+  color: var(--ai-surface-card);
+}
+
+.ai-album-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 18px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ai-border) transparent;
 }
 
 /* --- narrow skin: a compact widget, e.g. embedded in a sidebar or popover -------- */

@@ -11,6 +11,7 @@
 
 import { ref, type HTMLAttributes } from 'vue';
 import AnnounceBell from '@/announce/AnnounceBell.vue';
+import AlbumDrawer from '@/chat/AlbumDrawer.vue';
 import OaThemeToggle from '@/components/OaThemeToggle.vue';
 import { providePanelHost } from '@/composables/usePanelHost';
 import { t } from '@/composables/useI18n';
@@ -74,6 +75,11 @@ defineExpose({ body });
       <OaThemeToggle />
       <AccountMenu v-if="currentUser" :account="currentUser" />
     </div>
+
+    <!-- The account's album, opened from the menu above. It teleports to
+         <body> itself, so where it sits in this tree is only about who can
+         open it. -->
+    <AlbumDrawer />
 
     <slot name="banners" />
 

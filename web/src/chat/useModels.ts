@@ -18,6 +18,15 @@ export interface ModelCapabilities {
   supports_streaming: boolean;
   supports_system_prompt: boolean;
   supports_tools: boolean;
+  /**
+   * Two ways to draw: a chat answer that carries the picture itself, and a
+   * model the provider exposes on its native images endpoint. The studio
+   * offers exactly the models with either one; the second also says whether
+   * the model can look at a reference picture, which the images endpoint
+   * cannot accept.
+   */
+  supports_image_output: boolean;
+  supports_image_api: boolean;
   context_window: number;
   max_output_tokens: number;
 }

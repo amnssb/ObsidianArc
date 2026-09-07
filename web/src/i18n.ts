@@ -181,6 +181,7 @@ const en = {
   albumSelectAll: 'Select all',
   albumClear: 'Clear selection',
   albumDownloadSelected: 'Download selected',
+  albumDeleteSelected: 'Delete selected',
   albumSelectedCount: '{count} selected',
   albumPick: 'Select this picture',
 
@@ -226,7 +227,7 @@ const en = {
   navProviders: 'Providers',
   navModels: 'Models',
   navUsage: 'Usage',
-  navAlbum: 'Album',
+  navAlbum: 'My album',
   navResources: 'Resources',
   resourcesSubtitle: 'What this instance is costing the machine it runs on.',
   resStorage: 'Storage',

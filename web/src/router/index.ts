@@ -45,6 +45,10 @@ const routes: RouteRecordRaw[] = [
     component: RootView,
     children: [
       { path: '', name: 'chat', component: { render: () => null } },
+      // The 生图 studio. Not a column like the panels: the chat surface itself
+      // swaps for it (ChatSurface reads the route name), so the rail, the
+      // header and the banners all stay exactly where they were.
+      { path: 'images', name: 'images', component: { render: () => null }, meta: { auth: true } },
       { path: 'settings', component: SettingsPanel, meta: { auth: true } },
       { path: 'keys', component: KeysPanel, meta: { auth: true } },
       { path: 'usage', component: UsagePanel, meta: { auth: true } },

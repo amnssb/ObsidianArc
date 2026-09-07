@@ -11,19 +11,30 @@
 // beside send.
 
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { fetchUsage, type UsageSummary } from '@/api/usage';
 import OaIconButton from '@/components/OaIconButton.vue';
 import OaMenu from '@/components/OaMenu.vue';
 import OaMenuItem from '@/components/OaMenuItem.vue';
 import OaUsageWindow from '@/components/OaUsageWindow.vue';
 import { t } from '@/composables/useI18n';
-import { IconFile, IconImage, IconPlus } from '@/icons';
+import { IconFile, IconImage, IconPlus, IconSpark } from '@/icons';
 
 const props = defineProps<{ disabled: boolean }>();
 const emit = defineEmits<{
   (event: 'pick-images'): void;
   (event: 'pick-files'): void;
 }>();
+
+// 生图 mode is a route, not a state on this screen: the studio swaps in over
+// the same shell, and this menu is where the reader already goes to attach
+// pictures, so it is where the way to draw them belongs.
+const router = useRouter();
+
+function openStudio(close: () => void): void {
+  close();
+  void router.push('/images');
+}
 
 // Usage is fetched when the menu opens rather than on a timer: it is only
 // ever read while the panel is on screen, and polling it would be a request
@@ -57,6 +68,9 @@ function onToggle(wasOpen: boolean): void {
     </template>
 
     <template #default="{ close }">
+      <OaMenuItem :title="t('imageToolbox')" @click="openStudio(close)">
+        <template #leading><IconSpark :size="14" /></template>
+      </OaMenuItem>
       <OaMenuItem :title="t('addImage')" @click="close(); emit('pick-images')">
         <template #leading><IconImage :size="14" /></template>
       </OaMenuItem>

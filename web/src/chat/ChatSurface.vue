@@ -5,7 +5,8 @@
 // side panel arrives — so /settings and /keys narrow the conversation rather
 // than covering it.
 
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import OaIconButton from '@/components/OaIconButton.vue';
 import OaScrollArea from '@/components/OaScrollArea.vue';
 import { t } from '@/composables/useI18n';
@@ -14,6 +15,7 @@ import ChatComposer from './ChatComposer.vue';
 import ChatMessage from './ChatMessage.vue';
 import ChatPending from './ChatPending.vue';
 import ChatSidebar from './ChatSidebar.vue';
+import ImageStudio from './ImageStudio.vue';
 import {
   active, addImages, busy, dragging, draft, flash, historyOpen, messages, pending,
   scrollTick, startNewConversation, status, submit, suggestions, switchTick,
@@ -21,6 +23,13 @@ import {
 import { isAdmin } from '@/stores/session';
 
 const emit = defineEmits<{ (event: 'open-setup'): void }>();
+
+// The 生图 studio replaces the conversation in place: the rail beside it and
+// everything above it do not move, only this column swaps its content. The
+// route carries the mode so the address bar stays shareable and the browser's
+// back button leaves the studio the way it entered it.
+const route = useRoute();
+const imageMode = computed(() => route.name === 'images');
 
 const scroll = ref<InstanceType<typeof OaScrollArea> | null>(null);
 const composer = ref<InstanceType<typeof ChatComposer> | null>(null);
@@ -91,7 +100,9 @@ defineExpose({ focus: () => composer.value?.focus() });
 <template>
   <ChatSidebar />
 
-  <div class="ai-chat-main" @dragenter="onDragOver" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+  <ImageStudio v-if="imageMode" />
+
+  <div v-else class="ai-chat-main" @dragenter="onDragOver" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
     <!-- The wide skin hides this bar in favour of the workspace header; it is
          the navigation on a narrow screen, where the rail is an overlay. -->
     <div class="ai-chat-bar">

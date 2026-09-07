@@ -137,6 +137,9 @@ export const IconFile = draw('FileText', [
   'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z',
   'M14 3v5h5', 'M9 13h6', 'M9 17h4',
 ]);
+export const IconDownload = draw('Download', [
+  'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'm7 10 5 5 5-5', 'M12 15V3',
+]);
 export const IconSpark = draw('Sparkles', [
   'M12 3v4', 'M12 17v4', 'M3 12h4', 'M17 12h4',
   'M5.6 5.6l2.8 2.8', 'M15.6 15.6l2.8 2.8', 'M18.4 5.6l-2.8 2.8', 'M8.4 15.6l-2.8 2.8',

@@ -173,6 +173,7 @@ export const zh: Record<StringKey, string> = {
   albumSelectAll: '全选',
   albumClear: '清除选择',
   albumDownloadSelected: '下载所选',
+  albumDeleteSelected: '删除所选',
   albumSelectedCount: '已选 {count} 张',
   albumPick: '选择这张图片',
 
@@ -215,7 +216,7 @@ export const zh: Record<StringKey, string> = {
   navProviders: '服务商',
   navModels: '模型',
   navUsage: '用量',
-  navAlbum: '相册/历史图片',
+  navAlbum: '我的相册',
   navResources: '占用',
   resourcesSubtitle: '这个实例正在占用宿主机的哪些资源。',
   resStorage: '存储',
